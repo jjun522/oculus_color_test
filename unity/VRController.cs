@@ -65,10 +65,18 @@ public class VRController : MonoBehaviour
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
         
-        lastStatus = "📡 서버 탐색 중...";
-        UpdateStatusText(); // VR에는 안 보이지만 로그에는 남음
+        lastStatus = "📡 서버 탐색 중 (5초)...";
+        UpdateStatusText();
         
-        await DiscoverServerIP(); // 💡 서버 자동으로 찾기
+        // 💡 5초 동안 로컬 서버를 찾아보고, 못 찾으면 공인 IP로 직접 접속을 시도합니다.
+        await Task.WhenAny(DiscoverServerIP(), Task.Delay(5000));
+        
+        if (string.IsNullOrEmpty(serverIP) || serverIP == "127.0.0.1")
+        {
+            Debug.Log("⚠️ 로컬 서버를 찾지 못했습니다. 공인 IP로 접속 시도...");
+            serverIP = "118.47.175.67"; // 공인 IP를 기본값으로 설정
+        }
+
         await ConnectToServer();
     }
 
