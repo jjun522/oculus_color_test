@@ -3,9 +3,7 @@ version: '3.8'
 services:
   backend:
     image: ghcr.io/jjun522/oculus_color_test/backend:latest
-    ports:
-      - "8001:8000"
-      - "50002:50002/udp"
+    # 포트 맵핑 제거: Nginx 프록시를 통해서만 접근 (보안 및 충돌 방지)
     restart: always
 
   frontend:

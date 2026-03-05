@@ -116,7 +116,8 @@ public class VRController : MonoBehaviour
         Uri serverUri = new Uri($"ws://{serverIP}:8000/ws");
         try
         {
-            await websocket.ConnectAsync(new Uri($"ws://{serverIP}:8001/ws"), CancellationToken.None);
+            // 💡 모든 통신이 12346 포트의 /ws 경로로 통합되었습니다.
+            await websocket.ConnectAsync(new Uri($"ws://{serverIP}:12346/ws"), CancellationToken.None);
             ReceiveMessages();
         }
         catch (Exception) { }

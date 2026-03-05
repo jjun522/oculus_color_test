@@ -19,8 +19,8 @@ const App = () => {
   };
 
   useEffect(() => {
-    // 💡 공개 IP로 접속하든 로컬로 접속하든, 브라우저 주소창의 IP를 따라 8001번 포트로 연결합니다.
-    const ws = new WebSocket(`ws://${window.location.hostname}:8001/ws`);
+    // 💡 모든 통신은 12346 포트 하나로 통합되었습니다. (Nginx 리버스 프록시 적용)
+    const ws = new WebSocket(`ws://${window.location.host}/ws`);
     wsRef.current = ws;
     ws.onopen = () => { setStatus('🟢 정상 연결됨'); addLog('시스템', '서버 연결 성공', '#10b981'); };
     ws.onclose = () => { setStatus('🔴 연결 끊김'); addLog('시스템', '서버 연결 단절', '#ef4444'); };
