@@ -85,7 +85,8 @@ public class VRController : MonoBehaviour
                 string message = Encoding.UTF8.GetString(result.Buffer);
                 if (message.StartsWith("EYE_SERVER:"))
                 {
-                    serverIP = message.Split(':')[1];
+                    // 💡 도커 안에서 보내는 IP가 아닌, 실제 패킷이 날아온 '서버 PC'의 IP를 사용합니다.
+                    serverIP = result.RemoteEndPoint.Address.ToString();
                     Debug.Log($"✅ 서버 발견: {serverIP}");
                     break;
                 }
