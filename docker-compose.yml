@@ -15,5 +15,5 @@ services:
       context: ./front
       dockerfile: Dockerfile
     ports:
-      - "80:80"
+      - "12346:80"
     restart: always
