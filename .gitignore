@@ -1,0 +1,26 @@
+# Common ignores
+node_modules/
+dist/
+build/
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+.DS_Store
+
+# Unity/Oculus specific
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+Assets/AssetStoreTools*
+*.csproj
+*.unitypackage
+*.sln
+*.userprefs
