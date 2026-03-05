@@ -107,7 +107,7 @@ public class VRController : MonoBehaviour
         Uri serverUri = new Uri($"ws://{serverIP}:8000/ws");
         try
         {
-            await websocket.ConnectAsync(serverUri, CancellationToken.None);
+            await websocket.ConnectAsync(new Uri($"ws://{serverIP}:8001/ws"), CancellationToken.None);
             ReceiveMessages();
         }
         catch (Exception) { }

@@ -19,7 +19,7 @@ const App = () => {
   };
 
   useEffect(() => {
-    const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws`);
+    const ws = new WebSocket(`ws://${window.location.hostname}:8001/ws`);
     wsRef.current = ws;
     ws.onopen = () => { setStatus('🟢 정상 연결됨'); addLog('시스템', '서버 연결 성공', '#10b981'); };
     ws.onclose = () => { setStatus('🔴 연결 끊김'); addLog('시스템', '서버 연결 단절', '#ef4444'); };
