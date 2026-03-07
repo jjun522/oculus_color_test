@@ -10,6 +10,8 @@ const App = () => {
 
   const [logs, setLogs] = useState([]);
   const [inputVal, setInputVal] = useState({ nasal: 30, temporal: 80, q0: 80, q1: 80, q2: 30, q3: 80 });
+  const [connectedDevices, setConnectedDevices] = useState([]);
+  const [selectedDevice, setSelectedDevice] = useState('ALL');
   const wsRef = useRef(null);
   const logEndRef = useRef(null);
 
@@ -26,7 +28,18 @@ const App = () => {
     ws.onclose = () => { setStatus('🔴 연결 끊김'); addLog('시스템', '서버 연결 단절', '#ef4444'); };
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
+        const textData = event.data;
+        if (typeof textData === 'string' && textData.startsWith('DEVICE_LIST:')) {
+          const devicesStr = textData.substring(12);
+          const devices = devicesStr ? devicesStr.split(',') : [];
+          setConnectedDevices(devices);
+
+          // 만약 선택된 기기가 ALL이 아니고, 새 목록에 없다면 ALL로 초기화
+          setSelectedDevice(prev => (prev !== 'ALL' && !devices.includes(prev)) ? 'ALL' : prev);
+          return;
+        }
+
+        const data = JSON.parse(textData);
         setVrState(data); // 💡 여기서 divMode를 받아 화면을 결정함
       } catch (e) { }
     };
@@ -37,8 +50,10 @@ const App = () => {
 
   const sendCommand = (cmd) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(cmd);
-      addLog('명령 ↑', cmd, '#3b82f6');
+      // 💡 ALL 이외의 기기가 선택되었으면 타겟팅 메시지로 변환
+      const finalCmd = selectedDevice === 'ALL' ? cmd : `TARGET:${selectedDevice}:${cmd}`;
+      wsRef.current.send(finalCmd);
+      addLog('명령 ↑', finalCmd, '#3b82f6');
     }
   };
 
@@ -127,6 +142,23 @@ const App = () => {
       <div style={styles.mainLayout}>
         <div style={styles.leftColumn}>
           <div style={styles.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ ...styles.cardTitle, marginBottom: 0 }}>조작 기기 선택</h3>
+            </div>
+            <select
+              value={selectedDevice}
+              onChange={(e) => setSelectedDevice(e.target.value)}
+              style={styles.deviceSelect}
+            >
+              <option value="ALL">전체 기기 (동시 조작)</option>
+              {connectedDevices.map(ip => (
+                <option key={ip} value={ip}>{ip}</option>
+              ))}
+            </select>
+            {connectedDevices.length === 0 && <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '5px' }}>접속된 VR 기기가 없습니다.</div>}
+          </div>
+
+          <div style={styles.card}>
             <h3 style={styles.cardTitle}>리모컨 (단축키 연동)</h3>
             <div style={styles.btnRow}>
               <button style={{ ...styles.btn, backgroundColor: '#ffe4e6', color: '#e11d48' }} onClick={() => sendCommand('EYE_LEFT')}>좌안</button>
@@ -210,6 +242,7 @@ const styles = {
   rightColumn: { flex: 1, backgroundColor: 'black', borderRadius: '20px', position: 'relative', overflow: 'hidden', border: '6px solid #1e293b', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' },
   card: { backgroundColor: 'white', borderRadius: '18px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' },
   cardTitle: { fontSize: '17px', fontWeight: 'bold', marginBottom: '15px', color: '#334155', borderLeft: '5px solid #3b82f6', paddingLeft: '10px' },
+  deviceSelect: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', fontWeight: 'bold', outline: 'none', backgroundColor: '#f8fafc', color: '#334155', cursor: 'pointer' },
   btnRow: { display: 'flex', gap: '6px' },
   btn: { flex: 1, padding: '12px 10px', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', transition: '0.2s' },
   controlGroup: { marginTop: '20px', paddingTop: '15px', borderTop: '1px dashed #cbd5e1' },
