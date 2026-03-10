@@ -33,9 +33,11 @@ public class VRController : MonoBehaviour
     public GameObject leftEyeGroup;
     public GameObject rightEyeGroup;
     
-    // 가상 격벽 참조
-    private GameObject leftSeptum;
-    private GameObject rightSeptum;
+
+    [Header("분할 화면 렌더러 (Inspector 할당)")]
+    [Tooltip("0: 우상단, 1: 우하단, 2: 좌상단, 3: 좌하단 순서로 넣어주세요.")]
+    public Renderer[] leftQuads = new Renderer[4]; 
+    public Renderer[] rightQuads = new Renderer[4];
 
     [Header("UI 연결")]
     public Text statusText;
@@ -66,7 +68,7 @@ public class VRController : MonoBehaviour
 
     private ClientWebSocket websocket;
     private ConcurrentQueue<string> commandQueue = new ConcurrentQueue<string>();
-    private string lastStatus = ""; // 💡 서버로 보낼 텍스트 상태 저장용
+    private string lastStatus = "";
 
     async void Start()
     {
@@ -74,13 +76,9 @@ public class VRController : MonoBehaviour
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
         
-        CreateSeptum(); // 가상 격벽 생성
-
         if (statusText != null) statusText.text = "📡 서버 탐색 중 (5초)...";
         lastStatus = "📡 서버 탐색 중 (5초)...";
-        // UpdateStatusText(); 처음에 이것 때문에 "Waiting"으로 덮어씌워질 수 있으므로 주석 처리
         
-        // 💡 5초 동안 로컬 서버를 찾아보고, 못 찾으면 공인 IP로 직접 접속을 시도합니다.
         await Task.WhenAny(DiscoverServerIP(), Task.Delay(5000));
         
         if (string.IsNullOrEmpty(serverIP) || serverIP == "127.0.0.1")
@@ -96,37 +94,10 @@ public class VRController : MonoBehaviour
         await ConnectToServer();
     }
 
-    private void CreateSeptum()
-    {
-        // 왼쪽 눈 오른쪽 끝 가림막
-        leftSeptum = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        leftSeptum.transform.parent = leftEyeGroup.transform.parent;
-        leftSeptum.transform.localPosition = new Vector3(0.5f, 0, 1.0f); // 중심에서 약간 앞/오른쪽 (더 가깝게)
-        leftSeptum.transform.localScale = new Vector3(0.1f, 20f, 20f); // 얇고 매우 넓은 판
-        Material unlitBlack = new Material(Shader.Find("Unlit/Color"));
-        unlitBlack.color = Color.black;
-        leftSeptum.GetComponent<Renderer>().material = unlitBlack; // 조명 무시 완벽한 검은색
-        Destroy(leftSeptum.GetComponent<Collider>());
-        leftSeptum.layer = LayerMask.NameToLayer("Default"); // UI 렌더링 무시 문제 해결
-
-        // 오른쪽 눈 왼쪽 끝 가림막
-        rightSeptum = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        rightSeptum.transform.parent = rightEyeGroup.transform.parent;
-        rightSeptum.transform.localPosition = new Vector3(-0.5f, 0, 1.0f);
-        rightSeptum.transform.localScale = new Vector3(0.1f, 20f, 20f);
-        rightSeptum.GetComponent<Renderer>().material = unlitBlack;
-        Destroy(rightSeptum.GetComponent<Collider>());
-        rightSeptum.layer = LayerMask.NameToLayer("Default");
-        
-        // 처음엔 끔
-        leftSeptum.SetActive(false);
-        rightSeptum.SetActive(false);
-    }
-
     private async Task DiscoverServerIP()
     {
         UdpClient udpClient = new UdpClient(50002);
-        udpClient.Client.ReceiveTimeout = 5000; // 5초 타임아웃
+        udpClient.Client.ReceiveTimeout = 5000;
         
         try
         {
@@ -136,7 +107,6 @@ public class VRController : MonoBehaviour
                 string message = Encoding.UTF8.GetString(result.Buffer);
                 if (message.StartsWith("EYE_SERVER:"))
                 {
-                    // 💡 도커 안에서 보내는 IP가 아닌, 실제 패킷이 날아온 '서버 PC'의 IP를 사용합니다.
                     serverIP = result.RemoteEndPoint.Address.ToString();
                     Debug.Log($"✅ 서버 발견: {serverIP}");
                     break;
@@ -155,34 +125,62 @@ public class VRController : MonoBehaviour
 
     private async Task ConnectToServer()
     {
-        websocket = new ClientWebSocket();
-        Uri serverUri = new Uri($"ws://{serverIP}:12346/ws");
-        try
+        if (statusText != null) statusText.text = $"📡 연결 시도 중...\n(Direct 12346 Port)";
+        bool connected = await TryConnect($"ws://{serverIP}:12346/ws");
+        
+        if (!connected)
         {
-            // 💡 모든 통신이 12346 포트의 /ws 경로로 통합되었습니다.
-            await websocket.ConnectAsync(serverUri, CancellationToken.None);
-            if (statusText != null) statusText.text = "✅ 연결 성공!\n컨트롤러 버튼을 눌러 검사 모드를 선택하세요.";
-            UpdateStartScreenText(); // 웹 서버에 대기 상태 전송
-            SendStateToServer();     // 💡 연결 즉시 현재의 모든 수치 데이터(uiText 포함)를 강제 전송
+            if (statusText != null) statusText.text = $"⚠️ 직접 연결 실패.\n프록시(80 포트)로 우회 접속 시도 중...";
+            Debug.Log("⚠️ 12346 포트 연결 실패, 80 포트(/vr/ws)로 폴백 접속 시도");
+            connected = await TryConnect($"ws://{serverIP}/vr/ws");
+        }
+
+        if (connected)
+        {
+            if (statusText != null) statusText.text = "✅ 연결 성공!\n키보드 C, 엔터, 스페이스바를 누르세요.";
+            UpdateStartScreenText(); 
+            SendStateToServer();     
             ReceiveMessages();
         }
+        else
+        {
+             if (statusText != null) statusText.text = $"❌ 모든 연결 시도 실패.\n방화벽, 포트(80, 12346) 설정을 확인하세요.";
+        }
+    }
+
+    private async Task<bool> TryConnect(string url)
+    {
+        websocket = new ClientWebSocket();
+        try
+        {
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3))) // 3초 타임아웃
+            {
+                await websocket.ConnectAsync(new Uri(url), cts.Token);
+                return websocket.State == WebSocketState.Open;
+            }
+        }
         catch (Exception e)
-        { 
-             if (statusText != null) statusText.text = $"❌ 연결 실패: {e.Message}\n앱을 재시작하거나 네트워크를 확인하세요.";
+        {
+            Debug.LogWarning($"❌ {url} 연결 실패: {e.Message}");
+            return false;
         }
     }
 
     private async void ReceiveMessages()
     {
         byte[] buffer = new byte[1024];
-        while (websocket.State == WebSocketState.Open)
+        while (websocket != null && websocket.State == WebSocketState.Open)
         {
-            var result = await websocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-            if (result.MessageType == WebSocketMessageType.Text)
+            try
             {
-                string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                commandQueue.Enqueue(message);
+                var result = await websocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    commandQueue.Enqueue(message);
+                }
             }
+            catch { break; }
         }
     }
 
@@ -198,62 +196,77 @@ public class VRController : MonoBehaviour
 
     void HandlePhysicalInput()
     {
+        // 🎮 [ VR 조이스틱 & 마우스 클릭 제어 ]
+        bool btnA = Input.GetKeyDown("joystick button 0"); 
+        bool btnB = Input.GetKeyDown("joystick button 1"); 
+        bool trigger = Input.GetKeyDown("joystick button 14") || Input.GetKeyDown("joystick button 15") || Input.GetMouseButtonDown(0);
+
+        // ⌨️ [ PC 키보드 제어 (VR 없이 완벽 테스트용) ]
+        bool keyStart2 = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.LeftControl);
+        bool keyStart4 = Input.GetKeyDown(KeyCode.Space);
+        
+        bool keyToggleEye = Input.GetKeyDown(KeyCode.LeftControl); // L/R/Both 눈 변경
+        bool keyChangeColor = Input.GetKeyDown(KeyCode.Space);     // 색상 변경
+        bool keyChangeTarget = Input.GetKeyDown(KeyCode.Escape);   // 제어 타겟(Nasal/Temporal 등) 변경
+        
+        bool keyBrightUp = Input.GetKeyDown(KeyCode.UpArrow);
+        bool keyBrightDown = Input.GetKeyDown(KeyCode.DownArrow);
+
+        // 1. 대기 화면 제어
         if (currentState == AppState.ModeSelection)
         {
-            if (Input.GetKeyDown("joystick button 15") || Input.GetKeyDown("joystick button 0") || Input.GetMouseButtonDown(0))
+            if (trigger || btnA || keyStart2)
             {
                 divisionMode = 2; StartTest();
             }
-            else if (Input.GetKeyDown("joystick button 9") || Input.GetKeyDown(KeyCode.Space))
+            else if (btnB || Input.GetKeyDown("joystick button 9") || keyStart4)
             {
                 divisionMode = 4; StartTest();
             }
             return;
         }
 
-        // 💡 밝기 조절 로직 (휠 + 조이스틱 + 방향키)
+        // 2. 밝기 조절 (위/아래 방향키 및 마우스 휠)
         float wheel = Input.GetAxis("Mouse ScrollWheel");
-        if (wheel > 0.01f) ProcessCommand("BRIGHT_UP");
-        else if (wheel < -0.01f) ProcessCommand("BRIGHT_DOWN");
-
         float vertical = Input.GetAxis("Vertical");
-        if (vertical > 0.8f) ProcessCommand("BRIGHT_UP");
-        else if (vertical < -0.8f) ProcessCommand("BRIGHT_DOWN");
 
-        if (Input.GetKeyDown(KeyCode.UpArrow)) ProcessCommand("BRIGHT_UP");
-        if (Input.GetKeyDown(KeyCode.DownArrow)) ProcessCommand("BRIGHT_DOWN");
+        if (keyBrightUp || wheel > 0.01f || vertical > 0.8f) ProcessCommand("BRIGHT_UP");
+        else if (keyBrightDown || wheel < -0.01f || vertical < -0.8f) ProcessCommand("BRIGHT_DOWN");
 
-        if (Input.GetKeyDown("joystick button 15") || Input.GetMouseButtonDown(0)) ProcessCommand("EYE_TARGET_TOGGLE");
-        if (Input.GetKeyDown("joystick button 9") || Input.GetKeyDown(KeyCode.Space)) ProcessCommand("CHANGE_COLOR");
-        if (Input.GetKeyDown("joystick button 1") || Input.GetKeyDown(KeyCode.Escape)) ProcessCommand("CHANGE_TARGET");
+        // 3. 모드 / 타겟 / 색상 제어
+        if (trigger || keyToggleEye) ProcessCommand("EYE_TARGET_TOGGLE");
+        if (Input.GetKeyDown("joystick button 2") || Input.GetKeyDown("joystick button 9") || keyChangeColor) ProcessCommand("CHANGE_COLOR");
+        if (btnB || keyChangeTarget) ProcessCommand("CHANGE_TARGET");
     }
 
     void StartTest()
     {
         currentState = AppState.Testing;
-        // 환자 몰입을 위해 십자선 제거 및 상태 텍스트 블라인드
         if (crosshair != null) crosshair.SetActive(false); 
         Apply();
     }
 
     void ProcessCommand(string cmd)
     {
-        // 💡 직접 수치 설정 명령 처리 (확장 버전)
+        // 💡 웹 UI에서 원격으로 명령이 내려오면, 즉시 대기 화면을 끝내고 테스트 모드로 자동 진입합니다.
+        if (currentState == AppState.ModeSelection)
+        {
+            StartTest();
+        }
+
         if (cmd.StartsWith("SET_VAL:"))
         {
-            string[] parts = cmd.Split(':'); // 예: [SET_VAL, L_NASAL, 80]
+            string[] parts = cmd.Split(':'); 
             if (parts.Length == 3)
             {
                 string target = parts[1];
                 int value = Mathf.Clamp(int.Parse(parts[2]), 0, 100);
                 
-                // 2분면 독립 타겟
                 if (target == "L_NASAL") leftNasal = value;
                 else if (target == "L_TEMP") leftTemporal = value;
                 else if (target == "R_NASAL") rightNasal = value;
                 else if (target == "R_TEMP") rightTemporal = value;
                 
-                // 4분면 타겟 (Q0:우상, Q1:우하, Q2:좌상, Q3:좌하)
                 else if (target == "Q0") quadBrightness[0] = value;
                 else if (target == "Q1") quadBrightness[1] = value;
                 else if (target == "Q2") quadBrightness[2] = value;
@@ -309,7 +322,7 @@ public class VRController : MonoBehaviour
 
     void ChangeBrightness(int amount)
     {
-        int maxLevel = 100; // 흰색 제한(80) 해제: 모든 색상 최대 100% 가능
+        int maxLevel = 100;
         if (divisionMode == 2)
         {
             if (adjustMode == 0 || adjustMode == 1) { leftNasal = Mathf.Clamp(leftNasal + amount, 0, maxLevel); rightNasal = Mathf.Clamp(rightNasal + amount, 0, maxLevel); }
@@ -336,10 +349,7 @@ public class VRController : MonoBehaviour
         leftEyeGroup.SetActive(isLeftActive);
         rightEyeGroup.SetActive(isRightActive);
         
-        // 양안 모드일 때만 격벽 활성화
         bool isBinocular = (currentEyeTarget == 2);
-        if(leftSeptum != null) leftSeptum.SetActive(isBinocular);
-        if(rightSeptum != null) rightSeptum.SetActive(isBinocular);
 
         if (leftCamera != null) leftCamera.cullingMask = isLeftActive ? -1 : 0;
         if (rightCamera != null) rightCamera.cullingMask = isRightActive ? -1 : 0;
@@ -351,8 +361,8 @@ public class VRController : MonoBehaviour
             Color rNasalColor = baseColors[currentColorIndex] * (rightNasal / 100.0f); rNasalColor.a = 1f;
             Color rTempColor = baseColors[currentColorIndex] * (rightTemporal / 100.0f); rTempColor.a = 1f;
             
-            if (isLeftActive) ApplyBiColor(leftEyeGroup, lNasalColor, lTempColor, true);
-            if (isRightActive) ApplyBiColor(rightEyeGroup, rNasalColor, rTempColor, false);
+            if (isLeftActive) ApplyBiColor(leftQuads, lNasalColor, lTempColor, true);
+            if (isRightActive) ApplyBiColor(rightQuads, rNasalColor, rTempColor, false);
         }
         else
         {
@@ -361,38 +371,43 @@ public class VRController : MonoBehaviour
             {
                 qColors[i] = baseColors[currentColorIndex] * (quadBrightness[i] / 100.0f); qColors[i].a = 1f;
             }
-            if (isLeftActive) ApplyQuadColor(leftEyeGroup, qColors);
-            if (isRightActive) ApplyQuadColor(rightEyeGroup, qColors);
+            if (isLeftActive) ApplyQuadColor(leftQuads, qColors);
+            if (isRightActive) ApplyQuadColor(rightQuads, qColors);
         }
         UpdateStatusText();
     }
 
-    void ApplyBiColor(GameObject group, Color nColor, Color tColor, bool isLeft)
+    void ApplyBiColor(Renderer[] quads, Color nasalColor, Color temporalColor, bool isLeft)
     {
-        foreach (Renderer r in group.GetComponentsInChildren<Renderer>())
-        {
-            bool isRightSide = r.transform.localPosition.x > 0;
-            bool isNasal = isLeft ? isRightSide : !isRightSide;
-            r.material.color = isNasal ? nColor : tColor;
-        }
+        // 0:우상, 1:우하, 2:좌상, 3:좌하
+        // 왼쪽 눈 (isLeft=true): 오른쪽(0,1)이 코쪽(Nasal), 왼쪽(2,3)이 귀쪽(Temporal)
+        // 오른쪽 눈 (isLeft=false): 오른쪽(0,1)이 귀쪽(Temporal), 왼쪽(2,3)이 코쪽(Nasal)
+        
+        if (quads == null || quads.Length < 4) return;
+
+        bool isNasalRightSide = isLeft; 
+
+        if (quads[0] != null) quads[0].material.color = isNasalRightSide ? nasalColor : temporalColor;
+        if (quads[1] != null) quads[1].material.color = isNasalRightSide ? nasalColor : temporalColor;
+        if (quads[2] != null) quads[2].material.color = isNasalRightSide ? temporalColor : nasalColor;
+        if (quads[3] != null) quads[3].material.color = isNasalRightSide ? temporalColor : nasalColor;
     }
 
-    void ApplyQuadColor(GameObject group, Color[] c)
+    void ApplyQuadColor(Renderer[] quads, Color[] c)
     {
-        foreach (Renderer r in group.GetComponentsInChildren<Renderer>())
-        {
-            bool isRight = r.transform.localPosition.x > 0; bool isTop = r.transform.localPosition.y > 0;
-            if (isRight && isTop) r.material.color = c[0];
-            else if (isRight && !isTop) r.material.color = c[1];
-            else if (!isRight && isTop) r.material.color = c[2];
-            else if (!isRight && !isTop) r.material.color = c[3];
-        }
+        // c[0]=우상, c[1]=우하, c[2]=좌상, c[3]=좌하
+        if (quads == null || quads.Length < 4) return;
+
+        if (quads[0] != null) quads[0].material.color = c[0];
+        if (quads[1] != null) quads[1].material.color = c[1];
+        if (quads[2] != null) quads[2].material.color = c[2];
+        if (quads[3] != null) quads[3].material.color = c[3];
     }
 
     void UpdateStartScreenText()
     {
         lastStatus = "<b>[ 검사 대기 중 ]</b>\n트리거: 2분면 / 앱버튼: 4분면";
-        if (statusText != null) statusText.text = ""; // VR 화면에서는 텍스트 제거
+        if (statusText != null) statusText.text = ""; 
         SendStateToServer();
     }
 
@@ -400,7 +415,6 @@ public class VRController : MonoBehaviour
     {
         if (currentState == AppState.ModeSelection) return;
         
-        // 대표 텍스트 표기용 (웹 UI에서 상세히 보게 되므로 간단히)
         int targetBright = (divisionMode == 2) ? leftNasal : quadBrightness[(adjustMode == 0 ? 0 : adjustMode - 1)];
         float currentPercent = targetBright / 100f;
         float currentLux = (MAX_NITS * Mathf.Pow(currentPercent, GAMMA)) * PI;
@@ -410,7 +424,7 @@ public class VRController : MonoBehaviour
             : (adjustMode == 0 ? "전체 조절" : $"{quadNames[adjustMode - 1]} 조절");
 
         lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}";
-        if (statusText != null) statusText.text = ""; // VR 화면에서는 텍스트 제거 완벽화
+        if (statusText != null) statusText.text = ""; 
         SendStateToServer();
     }
 
@@ -430,7 +444,7 @@ public class VRController : MonoBehaviour
                 q1 = quadBrightness[1],
                 q2 = quadBrightness[2],
                 q3 = quadBrightness[3],
-                uiText = lastStatus // 💡 서버(리액트)에는 텍스트 정보 전달
+                uiText = string.IsNullOrEmpty(lastStatus) ? "VR 기기 연동 완료" : lastStatus
             };
             byte[] bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
             await websocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);

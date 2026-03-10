@@ -56,8 +56,8 @@ const App = () => {
 
   const sendCommand = (cmd) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      // 💡 ALL 이외의 기기가 선택되었으면 타겟팅 메시지로 변환
-      const finalCmd = selectedDevice === 'ALL' ? cmd : `TARGET:${selectedDevice}:${cmd}`;
+      // 💡 프록시 환경에서 IP가 뭉개지므로, 특정 기기 타겟팅을 풀고 무조건 브로드캐스트 전송
+      const finalCmd = `TARGET:ALL:${cmd}`;
       wsRef.current.send(finalCmd);
       addLog('명령 ↑', finalCmd, '#3b82f6');
     }
@@ -295,7 +295,7 @@ const styles = {
   title: { fontSize: '24px', fontWeight: '900', color: '#1e293b', margin: 0 },
   statusBadge: (s) => ({ padding: '8px 18px', borderRadius: '25px', fontWeight: 'bold', fontSize: '14px', backgroundColor: s.includes('연결') ? '#dcfce7' : '#fee2e2', color: s.includes('연결') ? '#166534' : '#991b1b' }),
   mainLayout: { display: 'flex', gap: '25px', flex: 1, minHeight: 0 },
-  leftColumn: { width: '320px', display: 'flex', flexDirection: 'column', gap: '20px' },
+  leftColumn: { width: '320px', display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' },
   rightColumn: { flex: 1, backgroundColor: 'black', borderRadius: '20px', position: 'relative', overflow: 'hidden', border: '6px solid #1e293b', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' },
   card: { backgroundColor: 'white', borderRadius: '18px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' },
   cardTitle: { fontSize: '17px', fontWeight: 'bold', marginBottom: '15px', color: '#334155', borderLeft: '5px solid #3b82f6', paddingLeft: '10px' },
