@@ -45,9 +45,14 @@ const App = () => {
           return;
         }
 
+        // 💡 수신된 JSON 데이터 로그 출력
+        addLog('수신 ↓', textData, '#8b5cf6');
+
         const data = JSON.parse(textData);
-        setVrState(data); // 💡 여기서 divMode를 받아 화면을 결정함
-      } catch (e) { }
+        setVrState(data); // 여기서 divMode를 받아 화면을 결정함
+      } catch (e) {
+        addLog('에러 ⚠️', `JSON 파싱 실패: ${e.message}`, '#ef4444');
+      }
     };
     return () => ws.close();
   }, []);

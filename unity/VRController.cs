@@ -76,51 +76,20 @@ public class VRController : MonoBehaviour
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
         
-        if (statusText != null) statusText.text = "📡 서버 탐색 중 (5초)...";
-        lastStatus = "📡 서버 탐색 중 (5초)...";
+        lastStatus = "📡 서버 (172.20.10.14) 직항 연결 중...";
+        if (statusText != null) statusText.text = lastStatus;
         
-        await Task.WhenAny(DiscoverServerIP(), Task.Delay(5000));
-        
-        if (string.IsNullOrEmpty(serverIP) || serverIP == "127.0.0.1")
-        {
-            Debug.Log("⚠️ 로컬 서버를 찾지 못했습니다. 기존 공인 IP로 접속 시도...");
-            if (statusText != null) statusText.text = "⚠️ 자동 탐색 실패.\n기본(수동설정) IP로 접속 시도 중...";
-        }
-        else
-        {
-             if (statusText != null) statusText.text = $"✅ 서버 발견: {serverIP}\n연결 중...";
-        }
+        // 💡 도커(Docker) 환경에서는 UDP 자동 탐색이 도커 내부 IP(172.20.0.x 등)를 반환하므로 완전히 차단합니다.
+        // 유저님의 맥(Mac) IP 주소로 완벽하게 고정합니다.
+        serverIP = "172.20.10.14";
+        Debug.Log($"✅ 고정 IP 접속 시도: {serverIP}");
 
         await ConnectToServer();
     }
 
     private async Task DiscoverServerIP()
     {
-        UdpClient udpClient = new UdpClient(50002);
-        udpClient.Client.ReceiveTimeout = 5000;
-        
-        try
-        {
-            while (true)
-            {
-                UdpReceiveResult result = await udpClient.ReceiveAsync();
-                string message = Encoding.UTF8.GetString(result.Buffer);
-                if (message.StartsWith("EYE_SERVER:"))
-                {
-                    serverIP = result.RemoteEndPoint.Address.ToString();
-                    Debug.Log($"✅ 서버 발견: {serverIP}");
-                    break;
-                }
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"❌ 서버 탐색 오류: {e.Message}");
-        }
-        finally
-        {
-            udpClient.Close();
-        }
+        // 사용 안 함 (도커 환경 문제 방지)
     }
 
     private async Task ConnectToServer()
@@ -131,7 +100,7 @@ public class VRController : MonoBehaviour
         if (!connected)
         {
             if (statusText != null) statusText.text = $"⚠️ 직접 연결 실패.\n프록시(80 포트)로 우회 접속 시도 중...";
-            Debug.Log("⚠️ 12346 포트 연결 실패, 80 포트(/vr/ws)로 폴백 접속 시도");
+            Debug.Log($"⚠️ 12346 포트 연결 실패, 80 포트(/vr/ws)로 폴백 접속 시도");
             connected = await TryConnect($"ws://{serverIP}/vr/ws");
         }
 
