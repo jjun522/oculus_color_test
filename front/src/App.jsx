@@ -3,13 +3,17 @@ import React, { useState, useEffect, useRef } from 'react';
 const App = () => {
   const [status, setStatus] = useState('서버 연결 중...');
   const [vrState, setVrState] = useState({
-    divMode: 2, colorIdx: 0, nasal: 50, temporal: 50,
+    divMode: 2, colorIdx: 0,
+    leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
     q0: 50, q1: 50, q2: 50, q3: 50,
     uiText: "VR 기기의 신호를 기다리고 있습니다..."
   });
 
   const [logs, setLogs] = useState([]);
-  const [inputVal, setInputVal] = useState({ nasal: 30, temporal: 80, q0: 80, q1: 80, q2: 30, q3: 80 });
+  const [inputVal, setInputVal] = useState({
+    leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
+    q0: 80, q1: 80, q2: 30, q3: 80
+  });
   const [connectedDevices, setConnectedDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('ALL');
   const wsRef = useRef(null);
@@ -62,9 +66,16 @@ const App = () => {
     sendCommand(`SET_VAL:${target}:${val}`);
 
     // 💡 즉시 UI 반영 (Optimistic Update)
+    // 낙관적 업데이트를 위해 서버 데이터 구조와 동일하게 매핑
+    let stateKey = target.toLowerCase();
+    if (target === 'L_NASAL') stateKey = 'leftNasal';
+    if (target === 'L_TEMP') stateKey = 'leftTemporal';
+    if (target === 'R_NASAL') stateKey = 'rightNasal';
+    if (target === 'R_TEMP') stateKey = 'rightTemporal';
+
     setVrState(prev => ({
       ...prev,
-      [target.toLowerCase()]: parseInt(val)
+      [stateKey]: parseInt(val)
     }));
   };
 
@@ -100,16 +111,36 @@ const App = () => {
 
     return (
       <div style={styles.screenContainer}>
-        {/* 💡 divMode가 2일 때: 2분면 레이아웃 */}
+        {/* 💡 divMode가 2일 때: 양안 독립 2분면 레이아웃 */}
         {vrState.divMode === 2 ? (
-          <>
-            <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.nasal), borderRight: '4px solid black' }}>
-              <ValueOverlay percent={vrState.nasal} />
+          <div style={{ display: 'flex', width: '100%', height: '100%' }}>
+            {/* 왼쪽 눈 화면 */}
+            <div style={{ flex: 1, position: 'relative', borderRight: '8px solid #333' }}>
+              <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftTemporal) }}>
+                <ValueOverlay percent={vrState.leftTemporal} isSmall />
+                <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 귀쪽</div>
+              </div>
+              <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftNasal), borderLeft: '2px solid black' }}>
+                <ValueOverlay percent={vrState.leftNasal} isSmall />
+                <div style={{ position: 'absolute', top: 10, right: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 코쪽</div>
+              </div>
             </div>
-            <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.temporal) }}>
-              <ValueOverlay percent={vrState.temporal} />
+
+            {/* 가상 격벽 시뮬레이션 선 */}
+            <div style={{ width: '16px', backgroundColor: '#111', zIndex: 20 }}></div>
+
+            {/* 오른쪽 눈 화면 */}
+            <div style={{ flex: 1, position: 'relative', borderLeft: '8px solid #333' }}>
+              <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightNasal), borderRight: '2px solid black' }}>
+                <ValueOverlay percent={vrState.rightNasal} isSmall />
+                <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 코쪽</div>
+              </div>
+              <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightTemporal) }}>
+                <ValueOverlay percent={vrState.rightTemporal} isSmall />
+                <div style={{ position: 'absolute', top: 10, right: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 귀쪽</div>
+              </div>
             </div>
-          </>
+          </div>
         ) : (
           /* 💡 divMode가 4일 때: 4분면 레이아웃 */
           <>
@@ -168,23 +199,47 @@ const App = () => {
             <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginTop: '10px' }} onClick={() => sendCommand('CHANGE_COLOR')}>색상 변경 (Space)</button>
             <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginTop: '10px' }} onClick={() => sendCommand('CHANGE_TARGET')}>타겟 영역 변경 (Enter)</button>
             <div style={{ marginTop: '15px' }}>
-              <button style={{ ...styles.btn, backgroundColor: '#3b82f6', color: 'white', width: '100%', marginBottom: '6px', fontSize: '18px' }} onClick={() => sendCommand('BRIGHT_UP')}>▲ 밝기 +2% (↑)</button>
-              <button style={{ ...styles.btn, backgroundColor: '#3b82f6', color: 'white', width: '100%', fontSize: '18px' }} onClick={() => sendCommand('BRIGHT_DOWN')}>▼ 밝기 -2% (↓)</button>
+              <button style={{ ...styles.btn, backgroundColor: '#3b82f6', color: 'white', width: '100%', marginBottom: '6px', fontSize: '18px' }} onClick={() => sendCommand('BRIGHT_UP')}>▲ 일괄 밝기 +2% (↑)</button>
+              <button style={{ ...styles.btn, backgroundColor: '#3b82f6', color: 'white', width: '100%', fontSize: '18px' }} onClick={() => sendCommand('BRIGHT_DOWN')}>▼ 일괄 밝기 -2% (↓)</button>
             </div>
             {/* 💡 [핵심] 수치 직접 입력 섹션 */}
             <div style={styles.controlGroup}>
-              <div style={styles.groupHeader}><span>🎯 수치 직접 설정</span></div>
+              <div style={{ ...styles.groupHeader, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>🎯 독립 수치 제어</span>
+                <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 'bold' }}>{vrState.divMode === 2 ? '2분면 모드' : '4분면 모드'}</span>
+              </div>
 
               {vrState.divMode === 2 ? (
-                /* 2분면용 입력창 */
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={styles.inputRow}>
-                    <input type="number" value={inputVal.nasal} onChange={e => setInputVal({ ...inputVal, nasal: e.target.value })} style={styles.smallInput} />
-                    <button style={styles.setBtn} onClick={() => sendVal('NASAL', inputVal.nasal)}>코쪽 설정</button>
+                /* 2분면용 독립 양안 입력창 */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* 좌안 패널 */}
+                  <div style={styles.eyePanel}>
+                    <div style={styles.eyeTitle}>[ 좌 안 ]</div>
+                    <div style={styles.inputRow}>
+                      <span style={{ width: '35px', fontSize: '12px' }}>코쪽</span>
+                      <input type="number" value={inputVal.leftNasal} onChange={e => setInputVal({ ...inputVal, leftNasal: e.target.value })} style={styles.smallInput} />
+                      <button style={styles.setBtn} onClick={() => sendVal('L_NASAL', inputVal.leftNasal)}>Set</button>
+                    </div>
+                    <div style={styles.inputRow}>
+                      <span style={{ width: '35px', fontSize: '12px' }}>귀쪽</span>
+                      <input type="number" value={inputVal.leftTemporal} onChange={e => setInputVal({ ...inputVal, leftTemporal: e.target.value })} style={styles.smallInput} />
+                      <button style={styles.setBtn} onClick={() => sendVal('L_TEMP', inputVal.leftTemporal)}>Set</button>
+                    </div>
                   </div>
-                  <div style={styles.inputRow}>
-                    <input type="number" value={inputVal.temporal} onChange={e => setInputVal({ ...inputVal, temporal: e.target.value })} style={styles.smallInput} />
-                    <button style={styles.setBtn} onClick={() => sendVal('TEMPORAL', inputVal.temporal)}>귀쪽 설정</button>
+
+                  {/* 우안 패널 */}
+                  <div style={styles.eyePanel}>
+                    <div style={{ ...styles.eyeTitle, color: '#0284c7' }}>[ 우 안 ]</div>
+                    <div style={styles.inputRow}>
+                      <span style={{ width: '35px', fontSize: '12px' }}>코쪽</span>
+                      <input type="number" value={inputVal.rightNasal} onChange={e => setInputVal({ ...inputVal, rightNasal: e.target.value })} style={styles.smallInput} />
+                      <button style={styles.setBtn} onClick={() => sendVal('R_NASAL', inputVal.rightNasal)}>Set</button>
+                    </div>
+                    <div style={styles.inputRow}>
+                      <span style={{ width: '35px', fontSize: '12px' }}>귀쪽</span>
+                      <input type="number" value={inputVal.rightTemporal} onChange={e => setInputVal({ ...inputVal, rightTemporal: e.target.value })} style={styles.smallInput} />
+                      <button style={styles.setBtn} onClick={() => sendVal('R_TEMP', inputVal.rightTemporal)}>Set</button>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -247,8 +302,10 @@ const styles = {
   btn: { flex: 1, padding: '12px 10px', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', transition: '0.2s' },
   controlGroup: { marginTop: '20px', paddingTop: '15px', borderTop: '1px dashed #cbd5e1' },
   groupHeader: { fontSize: '14px', fontWeight: 'bold', color: '#64748b', marginBottom: '10px' },
-  inputRow: { display: 'flex', gap: '5px' },
-  smallInput: { width: '60px', padding: '8px', borderRadius: '6px', border: '1px solid #ddd', textAlign: 'center' },
+  eyePanel: { padding: '8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '5px' },
+  eyeTitle: { fontSize: '13px', fontWeight: '900', color: '#e11d48', textAlign: 'center', marginBottom: '4px' },
+  inputRow: { display: 'flex', gap: '5px', alignItems: 'center' },
+  smallInput: { width: '45px', padding: '6px', borderRadius: '6px', border: '1px solid #ddd', textAlign: 'center' },
   setBtn: { flex: 1, backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
   qInputBox: { display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#fff', padding: '5px', borderRadius: '8px', border: '1px solid #eee', alignItems: 'center' },
   qBtn: { width: '100%', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' },

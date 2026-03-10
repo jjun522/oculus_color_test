@@ -14,8 +14,10 @@ public class VRStateData
 {
     public int divMode;
     public int colorIdx;
-    public int nasal;
-    public int temporal;
+    public int leftNasal;
+    public int leftTemporal;
+    public int rightNasal;
+    public int rightTemporal;
     public int q0, q1, q2, q3;
     public string uiText;
 }
@@ -30,6 +32,10 @@ public class VRController : MonoBehaviour
     public Camera rightCamera;
     public GameObject leftEyeGroup;
     public GameObject rightEyeGroup;
+    
+    // 가상 격벽 참조
+    private GameObject leftSeptum;
+    private GameObject rightSeptum;
 
     [Header("UI 연결")]
     public Text statusText;
@@ -39,8 +45,11 @@ public class VRController : MonoBehaviour
     private AppState currentState = AppState.ModeSelection;
 
     private int divisionMode = 2;
-    private int nasalBrightness = 50;
-    private int temporalBrightness = 50;
+    // 시야 고정된 독립 밝기 수치
+    private int leftNasal = 50;
+    private int leftTemporal = 50;
+    private int rightNasal = 50;
+    private int rightTemporal = 50;
     private int[] quadBrightness = new int[] { 50, 50, 50, 50 };
 
     private int currentEyeTarget = 0;
@@ -65,6 +74,8 @@ public class VRController : MonoBehaviour
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
         
+        CreateSeptum(); // 가상 격벽 생성
+
         lastStatus = "📡 서버 탐색 중 (5초)...";
         UpdateStatusText();
         
@@ -78,6 +89,32 @@ public class VRController : MonoBehaviour
         }
 
         await ConnectToServer();
+    }
+
+    private void CreateSeptum()
+    {
+        // 왼쪽 눈 오른쪽 끝 가림막
+        leftSeptum = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        leftSeptum.transform.parent = leftEyeGroup.transform.parent; // 카메라 자식 또는 환경 그룹 자식
+        leftSeptum.transform.localPosition = new Vector3(0.5f, 0, 1.5f); // 중심에서 약간 앞/오른쪽
+        leftSeptum.transform.localScale = new Vector3(0.1f, 10f, 10f); // 얇고 넓은 판
+        leftSeptum.GetComponent<Renderer>().material.color = Color.black; // 완벽한 검은색
+        Destroy(leftSeptum.GetComponent<Collider>()); // 충돌체 제거
+        // 오직 왼쪽 카메라만 보도록 레이어 설정 또는 코드 기반 처리
+        leftSeptum.layer = LayerMask.NameToLayer("UI"); // 기본적으로 아무나 보게 한 후 컬링 마스크 조정 
+
+        // 오른쪽 눈 왼쪽 끝 가림막
+        rightSeptum = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        rightSeptum.transform.parent = rightEyeGroup.transform.parent;
+        rightSeptum.transform.localPosition = new Vector3(-0.5f, 0, 1.5f);
+        rightSeptum.transform.localScale = new Vector3(0.1f, 10f, 10f);
+        rightSeptum.GetComponent<Renderer>().material.color = Color.black;
+        Destroy(rightSeptum.GetComponent<Collider>());
+        rightSeptum.layer = LayerMask.NameToLayer("UI");
+        
+        // 처음엔 끔
+        leftSeptum.SetActive(false);
+        rightSeptum.SetActive(false);
     }
 
     private async Task DiscoverServerIP()
@@ -182,7 +219,8 @@ public class VRController : MonoBehaviour
     void StartTest()
     {
         currentState = AppState.Testing;
-        if (crosshair != null) crosshair.SetActive(true);
+        // 환자 몰입을 위해 십자선 제거 및 상태 텍스트 블라인드
+        if (crosshair != null) crosshair.SetActive(false); 
         Apply();
     }
 
@@ -191,15 +229,18 @@ public class VRController : MonoBehaviour
         // 💡 직접 수치 설정 명령 처리 (확장 버전)
         if (cmd.StartsWith("SET_VAL:"))
         {
-            string[] parts = cmd.Split(':'); // 예: [SET_VAL, Q0, 80]
+            string[] parts = cmd.Split(':'); // 예: [SET_VAL, L_NASAL, 80]
             if (parts.Length == 3)
             {
                 string target = parts[1];
                 int value = Mathf.Clamp(int.Parse(parts[2]), 0, 100);
                 
-                // 2분면 타겟
-                if (target == "NASAL") nasalBrightness = value;
-                else if (target == "TEMPORAL") temporalBrightness = value;
+                // 2분면 독립 타겟
+                if (target == "L_NASAL") leftNasal = value;
+                else if (target == "L_TEMP") leftTemporal = value;
+                else if (target == "R_NASAL") rightNasal = value;
+                else if (target == "R_TEMP") rightTemporal = value;
+                
                 // 4분면 타겟 (Q0:우상, Q1:우하, Q2:좌상, Q3:좌하)
                 else if (target == "Q0") quadBrightness[0] = value;
                 else if (target == "Q1") quadBrightness[1] = value;
@@ -232,9 +273,9 @@ public class VRController : MonoBehaviour
         adjustMode = newMode;
         if (divisionMode == 2)
         {
-            if (adjustMode == 1) { temporalBrightness = 80; nasalBrightness = 30; }
-            else if (adjustMode == 2) { nasalBrightness = 80; temporalBrightness = 30; }
-            else { nasalBrightness = 50; temporalBrightness = 50; }
+            if (adjustMode == 1) { leftTemporal = 80; rightTemporal = 80; leftNasal = 30; rightNasal = 30; }
+            else if (adjustMode == 2) { leftNasal = 80; rightNasal = 80; leftTemporal = 30; rightTemporal = 30; }
+            else { leftNasal = 50; rightNasal = 50; leftTemporal = 50; rightTemporal = 50; }
         }
         else
         {
@@ -259,8 +300,8 @@ public class VRController : MonoBehaviour
         int maxLevel = 100; // 흰색 제한(80) 해제: 모든 색상 최대 100% 가능
         if (divisionMode == 2)
         {
-            if (adjustMode == 0 || adjustMode == 1) nasalBrightness = Mathf.Clamp(nasalBrightness + amount, 0, maxLevel);
-            if (adjustMode == 0 || adjustMode == 2) temporalBrightness = Mathf.Clamp(temporalBrightness + amount, 0, maxLevel);
+            if (adjustMode == 0 || adjustMode == 1) { leftNasal = Mathf.Clamp(leftNasal + amount, 0, maxLevel); rightNasal = Mathf.Clamp(rightNasal + amount, 0, maxLevel); }
+            if (adjustMode == 0 || adjustMode == 2) { leftTemporal = Mathf.Clamp(leftTemporal + amount, 0, maxLevel); rightTemporal = Mathf.Clamp(rightTemporal + amount, 0, maxLevel); }
         }
         else
         {
@@ -282,16 +323,24 @@ public class VRController : MonoBehaviour
         bool isRightActive = (currentEyeTarget == 1 || currentEyeTarget == 2);
         leftEyeGroup.SetActive(isLeftActive);
         rightEyeGroup.SetActive(isRightActive);
+        
+        // 양안 모드일 때만 격벽 활성화
+        bool isBinocular = (currentEyeTarget == 2);
+        if(leftSeptum != null) leftSeptum.SetActive(isBinocular);
+        if(rightSeptum != null) rightSeptum.SetActive(isBinocular);
 
         if (leftCamera != null) leftCamera.cullingMask = isLeftActive ? -1 : 0;
         if (rightCamera != null) rightCamera.cullingMask = isRightActive ? -1 : 0;
 
         if (divisionMode == 2)
         {
-            Color nColor = baseColors[currentColorIndex] * (nasalBrightness / 100.0f); nColor.a = 1f;
-            Color tColor = baseColors[currentColorIndex] * (temporalBrightness / 100.0f); tColor.a = 1f;
-            if (isLeftActive) ApplyBiColor(leftEyeGroup, nColor, tColor, true);
-            if (isRightActive) ApplyBiColor(rightEyeGroup, nColor, tColor, false);
+            Color lNasalColor = baseColors[currentColorIndex] * (leftNasal / 100.0f); lNasalColor.a = 1f;
+            Color lTempColor = baseColors[currentColorIndex] * (leftTemporal / 100.0f); lTempColor.a = 1f;
+            Color rNasalColor = baseColors[currentColorIndex] * (rightNasal / 100.0f); rNasalColor.a = 1f;
+            Color rTempColor = baseColors[currentColorIndex] * (rightTemporal / 100.0f); rTempColor.a = 1f;
+            
+            if (isLeftActive) ApplyBiColor(leftEyeGroup, lNasalColor, lTempColor, true);
+            if (isRightActive) ApplyBiColor(rightEyeGroup, rNasalColor, rTempColor, false);
         }
         else
         {
@@ -338,16 +387,18 @@ public class VRController : MonoBehaviour
     void UpdateStatusText()
     {
         if (currentState == AppState.ModeSelection) return;
-        int targetBright = (divisionMode == 2) ? (adjustMode == 2 ? temporalBrightness : nasalBrightness) : quadBrightness[(adjustMode == 0 ? 0 : adjustMode - 1)];
+        
+        // 대표 텍스트 표기용 (웹 UI에서 상세히 보게 되므로 간단히)
+        int targetBright = (divisionMode == 2) ? leftNasal : quadBrightness[(adjustMode == 0 ? 0 : adjustMode - 1)];
         float currentPercent = targetBright / 100f;
         float currentLux = (MAX_NITS * Mathf.Pow(currentPercent, GAMMA)) * PI;
 
         string modeStr = (divisionMode == 2)
-            ? (adjustMode == 0 ? "양쪽 조절" : (adjustMode == 1 ? "코쪽 테스트" : "귀쪽 테스트"))
+            ? (adjustMode == 0 ? "양쪽 제어" : (adjustMode == 1 ? "코쪽 제어" : "귀쪽 제어"))
             : (adjustMode == 0 ? "전체 조절" : $"{quadNames[adjustMode - 1]} 조절");
 
-        lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}\n<color=#00FF00>밝기: {targetBright}% | {currentLux:F1} Lux</color>";
-        if (statusText != null) statusText.text = ""; // VR 화면에서는 텍스트 제거
+        lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}\n<color=#00FF00>Left N: {leftNasal}% | Right N: {rightNasal}%</color>";
+        if (statusText != null) statusText.text = ""; // VR 화면에서는 텍스트 제거 완벽화
         SendStateToServer();
     }
 
@@ -359,8 +410,10 @@ public class VRController : MonoBehaviour
             {
                 divMode = divisionMode,
                 colorIdx = currentColorIndex,
-                nasal = nasalBrightness,
-                temporal = temporalBrightness,
+                leftNasal = leftNasal,
+                leftTemporal = leftTemporal,
+                rightNasal = rightNasal,
+                rightTemporal = rightTemporal,
                 q0 = quadBrightness[0],
                 q1 = quadBrightness[1],
                 q2 = quadBrightness[2],

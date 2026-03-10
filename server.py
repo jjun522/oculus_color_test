@@ -110,5 +110,5 @@ async def websocket_endpoint(websocket: WebSocket):
         await broadcast_device_list()
 
 if __name__ == "__main__":
-    print(f"🚀 서버 가동 중... (Web: 12346, WebSocket: 8001)")
+    print(f"🚀 서버 가동 중... (Web: 12346, Backend: 8000)")
     uvicorn.run(app, host="0.0.0.0", port=8000)
