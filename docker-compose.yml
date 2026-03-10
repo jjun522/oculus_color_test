@@ -12,5 +12,4 @@ services:
     image: ghcr.io/jjun522/oculus_color_test/frontend:latest
     ports:
       - "12346:80"
-      - "80:80"
     restart: always

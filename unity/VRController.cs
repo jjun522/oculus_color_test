@@ -163,6 +163,7 @@ public class VRController : MonoBehaviour
             await websocket.ConnectAsync(serverUri, CancellationToken.None);
             if (statusText != null) statusText.text = "✅ 연결 성공!\n컨트롤러 버튼을 눌러 검사 모드를 선택하세요.";
             UpdateStartScreenText(); // 웹 서버에 대기 상태 전송
+            SendStateToServer();     // 💡 연결 즉시 현재의 모든 수치 데이터(uiText 포함)를 강제 전송
             ReceiveMessages();
         }
         catch (Exception e)
