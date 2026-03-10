@@ -62,5 +62,5 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"❌ 기기 연결 끊어짐")
 
 if __name__ == "__main__":
-    print(f"🚀 서버 가동 중... (Web: 12346, WebSocket: 8001)")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print(f"🚀 서버 가동 중... (Web Interface at port 80 or 12346, Backend/WS: 12346)")
+    uvicorn.run(app, host="0.0.0.0", port=12346)

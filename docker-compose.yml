@@ -3,11 +3,14 @@ version: '3.8'
 services:
   backend:
     image: ghcr.io/jjun522/oculus_color_test/backend:latest
-    # 포트 맵핑 제거: Nginx 프록시를 통해서만 접근 (보안 및 충돌 방지)
+    ports:
+      - "50002:50002/udp" # 유니티 자동 탐색용
+    # 포트 8001 제거: Nginx 프록시(12346)를 통해서만 접근
     restart: always
 
   frontend:
     image: ghcr.io/jjun522/oculus_color_test/frontend:latest
     ports:
       - "12346:80"
+      - "80:80"
     restart: always
