@@ -26,7 +26,9 @@ const App = () => {
 
   useEffect(() => {
     // 💡 모든 통신은 12346 포트 하나로 통합되었습니다. (Nginx 리버스 프록시 적용)
-    const ws = new WebSocket(`ws://${window.location.host}/ws`);
+    // 주소창에 특정 경로(/vr 등)가 붙어 있을 경우 이를 자동으로 감지해서 붙여줍니다.
+    const wsPath = window.location.pathname.replace(/\/$/, '');
+    const ws = new WebSocket(`ws://${window.location.host}${wsPath}/ws`);
     wsRef.current = ws;
     ws.onopen = () => { setStatus('🟢 정상 연결됨'); addLog('시스템', '서버 연결 성공', '#10b981'); };
     ws.onclose = () => { setStatus('🔴 연결 끊김'); addLog('시스템', '서버 연결 단절', '#ef4444'); };
