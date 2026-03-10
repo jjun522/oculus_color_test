@@ -76,16 +76,21 @@ public class VRController : MonoBehaviour
         
         CreateSeptum(); // 가상 격벽 생성
 
+        if (statusText != null) statusText.text = "📡 서버 탐색 중 (5초)...";
         lastStatus = "📡 서버 탐색 중 (5초)...";
-        UpdateStatusText();
+        // UpdateStatusText(); 처음에 이것 때문에 "Waiting"으로 덮어씌워질 수 있으므로 주석 처리
         
         // 💡 5초 동안 로컬 서버를 찾아보고, 못 찾으면 공인 IP로 직접 접속을 시도합니다.
         await Task.WhenAny(DiscoverServerIP(), Task.Delay(5000));
         
         if (string.IsNullOrEmpty(serverIP) || serverIP == "127.0.0.1")
         {
-            Debug.Log("⚠️ 로컬 서버를 찾지 못했습니다. 공인 IP로 접속 시도...");
-            serverIP = "118.47.175.67"; // 공인 IP를 기본값으로 설정
+            Debug.Log("⚠️ 로컬 서버를 찾지 못했습니다. 기존 공인 IP로 접속 시도...");
+            if (statusText != null) statusText.text = "⚠️ 자동 탐색 실패.\n기본(수동설정) IP로 접속 시도 중...";
+        }
+        else
+        {
+             if (statusText != null) statusText.text = $"✅ 서버 발견: {serverIP}\n연결 중...";
         }
 
         await ConnectToServer();
@@ -95,22 +100,23 @@ public class VRController : MonoBehaviour
     {
         // 왼쪽 눈 오른쪽 끝 가림막
         leftSeptum = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        leftSeptum.transform.parent = leftEyeGroup.transform.parent; // 카메라 자식 또는 환경 그룹 자식
-        leftSeptum.transform.localPosition = new Vector3(0.5f, 0, 1.5f); // 중심에서 약간 앞/오른쪽
-        leftSeptum.transform.localScale = new Vector3(0.1f, 10f, 10f); // 얇고 넓은 판
-        leftSeptum.GetComponent<Renderer>().material.color = Color.black; // 완벽한 검은색
-        Destroy(leftSeptum.GetComponent<Collider>()); // 충돌체 제거
-        // 오직 왼쪽 카메라만 보도록 레이어 설정 또는 코드 기반 처리
-        leftSeptum.layer = LayerMask.NameToLayer("UI"); // 기본적으로 아무나 보게 한 후 컬링 마스크 조정 
+        leftSeptum.transform.parent = leftEyeGroup.transform.parent;
+        leftSeptum.transform.localPosition = new Vector3(0.5f, 0, 1.0f); // 중심에서 약간 앞/오른쪽 (더 가깝게)
+        leftSeptum.transform.localScale = new Vector3(0.1f, 20f, 20f); // 얇고 매우 넓은 판
+        Material unlitBlack = new Material(Shader.Find("Unlit/Color"));
+        unlitBlack.color = Color.black;
+        leftSeptum.GetComponent<Renderer>().material = unlitBlack; // 조명 무시 완벽한 검은색
+        Destroy(leftSeptum.GetComponent<Collider>());
+        leftSeptum.layer = LayerMask.NameToLayer("Default"); // UI 렌더링 무시 문제 해결
 
         // 오른쪽 눈 왼쪽 끝 가림막
         rightSeptum = GameObject.CreatePrimitive(PrimitiveType.Cube);
         rightSeptum.transform.parent = rightEyeGroup.transform.parent;
-        rightSeptum.transform.localPosition = new Vector3(-0.5f, 0, 1.5f);
-        rightSeptum.transform.localScale = new Vector3(0.1f, 10f, 10f);
-        rightSeptum.GetComponent<Renderer>().material.color = Color.black;
+        rightSeptum.transform.localPosition = new Vector3(-0.5f, 0, 1.0f);
+        rightSeptum.transform.localScale = new Vector3(0.1f, 20f, 20f);
+        rightSeptum.GetComponent<Renderer>().material = unlitBlack;
         Destroy(rightSeptum.GetComponent<Collider>());
-        rightSeptum.layer = LayerMask.NameToLayer("UI");
+        rightSeptum.layer = LayerMask.NameToLayer("Default");
         
         // 처음엔 끔
         leftSeptum.SetActive(false);
@@ -150,14 +156,19 @@ public class VRController : MonoBehaviour
     private async Task ConnectToServer()
     {
         websocket = new ClientWebSocket();
-        Uri serverUri = new Uri($"ws://{serverIP}:8000/ws");
+        Uri serverUri = new Uri($"ws://{serverIP}:12346/ws");
         try
         {
             // 💡 모든 통신이 12346 포트의 /ws 경로로 통합되었습니다.
-            await websocket.ConnectAsync(new Uri($"ws://{serverIP}:12346/ws"), CancellationToken.None);
+            await websocket.ConnectAsync(serverUri, CancellationToken.None);
+            if (statusText != null) statusText.text = "✅ 연결 성공!\n컨트롤러 버튼을 눌러 검사 모드를 선택하세요.";
+            UpdateStartScreenText(); // 웹 서버에 대기 상태 전송
             ReceiveMessages();
         }
-        catch (Exception) { }
+        catch (Exception e)
+        { 
+             if (statusText != null) statusText.text = $"❌ 연결 실패: {e.Message}\n앱을 재시작하거나 네트워크를 확인하세요.";
+        }
     }
 
     private async void ReceiveMessages()
@@ -397,7 +408,7 @@ public class VRController : MonoBehaviour
             ? (adjustMode == 0 ? "양쪽 제어" : (adjustMode == 1 ? "코쪽 제어" : "귀쪽 제어"))
             : (adjustMode == 0 ? "전체 조절" : $"{quadNames[adjustMode - 1]} 조절");
 
-        lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}\n<color=#00FF00>Left N: {leftNasal}% | Right N: {rightNasal}%</color>";
+        lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}";
         if (statusText != null) statusText.text = ""; // VR 화면에서는 텍스트 제거 완벽화
         SendStateToServer();
     }
@@ -427,6 +438,9 @@ public class VRController : MonoBehaviour
 
     private async void OnDestroy()
     {
-        if (websocket != null) await websocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None);
+        if (websocket != null && websocket.State == WebSocketState.Open)
+        {
+            await websocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None);
+        }
     }
 }

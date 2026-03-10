@@ -4,6 +4,12 @@ import uvicorn
 import socket
 import threading
 import time
+import sys
+import codecs
+
+# 윈도우 콘솔에서 이모지/한글 출력이 깨지는 현상 방지
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
 
 app = FastAPI()
 connected_devices = {} # { "ip_address": websocket }
