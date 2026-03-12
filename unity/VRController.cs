@@ -20,12 +20,14 @@ public class VRStateData
     public int rightTemporal;
     public int q0, q1, q2, q3;
     public string uiText;
+    public int currentEyeTarget;
 }
 
 public class VRController : MonoBehaviour
 {
     [Header("서버 설정")]
     public string serverIP = "10.2.52.8";
+    public int serverPort = 12346;
 
     [Header("카메라 및 화면 그룹")]
     public Camera leftCamera;
@@ -76,31 +78,80 @@ public class VRController : MonoBehaviour
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
         
-        lastStatus = "📡 서버 (172.20.10.14) 직항 연결 중...";
+        lastStatus = "📡 서버 자동 탐지 중...";
         if (statusText != null) statusText.text = lastStatus;
         
-        // 💡 도커(Docker) 환경에서는 UDP 자동 탐색이 도커 내부 IP(172.20.0.x 등)를 반환하므로 완전히 차단합니다.
-        // 유저님의 맥(Mac) IP 주소로 완벽하게 고정합니다.
-        serverIP = "172.20.10.14";
-        Debug.Log($"✅ 고정 IP 접속 시도: {serverIP}");
-
+        // 💡 고정 IP 대신 자동 탐색을 수행합니다.
+        await DiscoverServerIP();
         await ConnectToServer();
     }
 
     private async Task DiscoverServerIP()
     {
-        // 사용 안 함 (도커 환경 문제 방지)
+        Debug.Log("📡 UDP 브로드캐스트 대기 중 (Port: 50002)...");
+        
+        using (UdpClient udpClient = new UdpClient())
+        {
+            // 💡 동일 PC에서 여러 프로세스가 포트를 공유할 수 있도록 설정 (로컬 테스트 시 필수)
+            udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 50002));
+
+            using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10))) 
+            {
+                try
+                {
+                    // 비동기 수신 시작
+                    var receiveTask = udpClient.ReceiveAsync();
+                    
+                    // Task.WhenAny를 사용하여 타임아웃 처리
+                    var completedTask = await Task.WhenAny(receiveTask, Task.Delay(-1, cts.Token));
+
+                    if (completedTask == receiveTask)
+                    {
+                        var result = await receiveTask;
+                        string message = Encoding.UTF8.GetString(result.Buffer);
+                        Debug.Log($"📩 UDP 수신 성공: {message} (From: {result.RemoteEndPoint})");
+
+                        if (message.StartsWith("EYE_SERVER:"))
+                        {
+                            string[] parts = message.Split(':');
+                            serverIP = parts[1];
+                            if (parts.Length > 2)
+                            {
+                                int.TryParse(parts[2], out serverPort);
+                            }
+                            Debug.Log($"✅ 서버 발견: {serverIP}:{serverPort}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("⚠️ UDP 탐색 타임아웃: 10초 동안 서버 신호를 받지 못했습니다.");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    Debug.LogWarning("⚠️ UDP 탐색 취소됨 (타임아웃)");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"❌ UDP Error: {e.Message}");
+                }
+            }
+        }
     }
 
     private async Task ConnectToServer()
     {
-        if (statusText != null) statusText.text = $"📡 연결 시도 중...\n(Direct 12346 Port)";
-        bool connected = await TryConnect($"ws://{serverIP}:12346/ws");
+        if (statusText != null) statusText.text = $"📡 연결 시도 중...\n({serverIP}:{serverPort})";
         
-        if (!connected)
+        // 1. 발견된 포트로 직접 연결 시도
+        bool connected = await TryConnect($"ws://{serverIP}:{serverPort}/ws");
+        
+        // 2. 실패 시 80 포트(프록시) 폴백 시도
+        if (!connected && serverPort != 80)
         {
             if (statusText != null) statusText.text = $"⚠️ 직접 연결 실패.\n프록시(80 포트)로 우회 접속 시도 중...";
-            Debug.Log($"⚠️ 12346 포트 연결 실패, 80 포트(/vr/ws)로 폴백 접속 시도");
+            Debug.Log($"⚠️ {serverPort} 포트 연결 실패, 80 포트(/vr/ws)로 폴백 접속 시도");
             connected = await TryConnect($"ws://{serverIP}/vr/ws");
         }
 
@@ -130,7 +181,11 @@ public class VRController : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogWarning($"❌ {url} 연결 실패: {e.Message}");
+            Debug.LogWarning($"❌ {url} 연결 실패: {e.GetType().Name} - {e.Message}");
+            if (e.InnerException != null)
+            {
+                Debug.LogWarning($"   Inner Exception: {e.InnerException.Message}");
+            }
             return false;
         }
     }
@@ -163,25 +218,25 @@ public class VRController : MonoBehaviour
         HandlePhysicalInput();
     }
 
+    private float lastAxisTime = 0f;
+    private const float AXIS_DELAY = 0.2f;
+
     void HandlePhysicalInput()
     {
-        // 🎮 [ VR 조이스틱 & 마우스 클릭 제어 ]
         bool btnA = Input.GetKeyDown("joystick button 0"); 
         bool btnB = Input.GetKeyDown("joystick button 1"); 
         bool trigger = Input.GetKeyDown("joystick button 14") || Input.GetKeyDown("joystick button 15") || Input.GetMouseButtonDown(0);
 
-        // ⌨️ [ PC 키보드 제어 (VR 없이 완벽 테스트용) ]
         bool keyStart2 = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.LeftControl);
         bool keyStart4 = Input.GetKeyDown(KeyCode.Space);
         
-        bool keyToggleEye = Input.GetKeyDown(KeyCode.LeftControl); // L/R/Both 눈 변경
-        bool keyChangeColor = Input.GetKeyDown(KeyCode.Space);     // 색상 변경
-        bool keyChangeTarget = Input.GetKeyDown(KeyCode.Escape);   // 제어 타겟(Nasal/Temporal 등) 변경
+        bool keyToggleEye = Input.GetKeyDown(KeyCode.LeftControl); 
+        bool keyChangeColor = Input.GetKeyDown(KeyCode.Space);     
+        bool keyChangeTarget = Input.GetKeyDown(KeyCode.Escape);   
         
         bool keyBrightUp = Input.GetKeyDown(KeyCode.UpArrow);
         bool keyBrightDown = Input.GetKeyDown(KeyCode.DownArrow);
 
-        // 1. 대기 화면 제어
         if (currentState == AppState.ModeSelection)
         {
             if (trigger || btnA || keyStart2)
@@ -195,14 +250,24 @@ public class VRController : MonoBehaviour
             return;
         }
 
-        // 2. 밝기 조절 (위/아래 방향키 및 마우스 휠)
         float wheel = Input.GetAxis("Mouse ScrollWheel");
         float vertical = Input.GetAxis("Vertical");
 
-        if (keyBrightUp || wheel > 0.01f || vertical > 0.8f) ProcessCommand("BRIGHT_UP");
-        else if (keyBrightDown || wheel < -0.01f || vertical < -0.8f) ProcessCommand("BRIGHT_DOWN");
+        // 💡 아날로그 조이스틱 입력을 제어하여 무한 루프(충돌) 방지
+        bool axisUp = vertical > 0.7f && Time.time - lastAxisTime > AXIS_DELAY;
+        bool axisDown = vertical < -0.7f && Time.time - lastAxisTime > AXIS_DELAY;
 
-        // 3. 모드 / 타겟 / 색상 제어
+        if (keyBrightUp || wheel > 0.01f || axisUp) 
+        {
+            ProcessCommand("BRIGHT_UP");
+            if (axisUp) lastAxisTime = Time.time;
+        }
+        else if (keyBrightDown || wheel < -0.01f || axisDown) 
+        {
+            ProcessCommand("BRIGHT_DOWN");
+            if (axisDown) lastAxisTime = Time.time;
+        }
+
         if (trigger || keyToggleEye) ProcessCommand("EYE_TARGET_TOGGLE");
         if (Input.GetKeyDown("joystick button 2") || Input.GetKeyDown("joystick button 9") || keyChangeColor) ProcessCommand("CHANGE_COLOR");
         if (btnB || keyChangeTarget) ProcessCommand("CHANGE_TARGET");
@@ -217,6 +282,8 @@ public class VRController : MonoBehaviour
 
     void ProcessCommand(string cmd)
     {
+        // 💡 알 수 없는 명령어(DEVICE_LIST, JSON 데이터 등) 무시 처리
+        if (cmd.StartsWith("DEVICE_LIST:") || cmd.StartsWith("{")) return;
         // 💡 웹 UI에서 원격으로 명령이 내려오면, 즉시 대기 화면을 끝내고 테스트 모드로 자동 진입합니다.
         if (currentState == AppState.ModeSelection)
         {
@@ -413,7 +480,8 @@ public class VRController : MonoBehaviour
                 q1 = quadBrightness[1],
                 q2 = quadBrightness[2],
                 q3 = quadBrightness[3],
-                uiText = string.IsNullOrEmpty(lastStatus) ? "VR 기기 연동 완료" : lastStatus
+                uiText = string.IsNullOrEmpty(lastStatus) ? "VR 기기 연동 완료" : lastStatus,
+                currentEyeTarget = currentEyeTarget
             };
             byte[] bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
             await websocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);

@@ -6,7 +6,8 @@ const App = () => {
     divMode: 2, colorIdx: 0,
     leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
     q0: 50, q1: 50, q2: 50, q3: 50,
-    uiText: "VR 기기의 신호를 기다리고 있습니다..."
+    uiText: "VR 기기의 신호를 기다리고 있습니다...",
+    currentEyeTarget: 2
   });
 
   const [logs, setLogs] = useState([]);
@@ -48,8 +49,25 @@ const App = () => {
         // 💡 수신된 JSON 데이터 로그 출력
         addLog('수신 ↓', textData, '#8b5cf6');
 
-        const data = JSON.parse(textData);
-        setVrState(data); // 여기서 divMode를 받아 화면을 결정함
+        if (textData.trim().startsWith('{')) {
+          const data = JSON.parse(textData);
+          setVrState(data);
+
+          // 💡 VR 기기에서 변경된 수치를 UI 입력창(inputVal)에도 즉시 동기화
+          // 사용자가 직접 입력 중일 때 튀는 현상을 방지하려면 더 복잡한 로직이 필요하지만,
+          // 현재는 VR의 상태를 마스터로 취급하여 동기화합니다.
+          setInputVal(prev => ({
+            ...prev,
+            leftNasal: data.leftNasal ?? prev.leftNasal,
+            leftTemporal: data.leftTemporal ?? prev.leftTemporal,
+            rightNasal: data.rightNasal ?? prev.rightNasal,
+            rightTemporal: data.rightTemporal ?? prev.rightTemporal,
+            q0: data.q0 ?? prev.q0,
+            q1: data.q1 ?? prev.q1,
+            q2: data.q2 ?? prev.q2,
+            q3: data.q3 ?? prev.q3,
+          }));
+        }
       } catch (e) {
         addLog('에러 ⚠️', `JSON 파싱 실패: ${e.message}`, '#ef4444');
       }
@@ -122,7 +140,7 @@ const App = () => {
         {vrState.divMode === 2 ? (
           <div style={{ display: 'flex', width: '100%', height: '100%' }}>
             {/* 왼쪽 눈 화면 */}
-            <div style={{ flex: 1, position: 'relative', borderRight: '8px solid #333' }}>
+            <div style={{ flex: 1, position: 'relative', borderRight: '8px solid #333', opacity: (vrState.currentEyeTarget === 0 || vrState.currentEyeTarget === 2) ? 1 : 0.2 }}>
               <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftTemporal) }}>
                 <ValueOverlay percent={vrState.leftTemporal} isSmall />
                 <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 귀쪽</div>
@@ -137,7 +155,7 @@ const App = () => {
             <div style={{ width: '16px', backgroundColor: '#111', zIndex: 20 }}></div>
 
             {/* 오른쪽 눈 화면 */}
-            <div style={{ flex: 1, position: 'relative', borderLeft: '8px solid #333' }}>
+            <div style={{ flex: 1, position: 'relative', borderLeft: '8px solid #333', opacity: (vrState.currentEyeTarget === 1 || vrState.currentEyeTarget === 2) ? 1 : 0.2 }}>
               <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightNasal), borderRight: '2px solid black' }}>
                 <ValueOverlay percent={vrState.rightNasal} isSmall />
                 <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 코쪽</div>
