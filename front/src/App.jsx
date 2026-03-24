@@ -193,7 +193,12 @@ const App = () => {
     <div style={styles.wrapper}>
       <header style={styles.header}>
         <h1 style={styles.title}>VR 검사 실시간 관제 시스템</h1>
-        <div style={styles.statusBadge(status)}>{status}</div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={styles.statusBadge(status)}>{status}</div>
+          <div style={styles.statusBadge(connectedDevices.length > 0 ? '🟢 VR 온라인' : '🔴 VR 오프라인')}>
+            {connectedDevices.length > 0 ? `🟢 VR: ${connectedDevices[0].substring(0, 8)}...` : '🔴 VR 미연결'}
+          </div>
+        </div>
       </header>
       <div style={styles.mainLayout}>
         <div style={styles.leftColumn}>

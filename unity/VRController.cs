@@ -34,7 +34,6 @@ public class VRController : MonoBehaviour
     public Camera rightCamera;
     public GameObject leftEyeGroup;
     public GameObject rightEyeGroup;
-    
 
     [Header("분할 화면 렌더러 (Inspector 할당)")]
     [Tooltip("0: 우상단, 1: 우하단, 2: 좌상단, 3: 좌하단 순서로 넣어주세요.")]
@@ -45,11 +44,15 @@ public class VRController : MonoBehaviour
     public Text statusText;
     public GameObject crosshair;
 
+    [Header("시각 고도화 설정")]
+    public float targetScale = 1.8f;   // 사각형 크기
+    public int leftLayer = 30;      // 좌안 전용 (Unity Editor에서 미리 생성 권장)
+    public int rightLayer = 31;     // 우안 전용 (Unity Editor에서 미리 생성 권장)
+
     private enum AppState { ModeSelection, Testing }
     private AppState currentState = AppState.ModeSelection;
 
     private int divisionMode = 2;
-    // 시야 고정된 독립 밝기 수치
     private int leftNasal = 50;
     private int leftTemporal = 50;
     private int rightNasal = 50;
@@ -71,224 +74,174 @@ public class VRController : MonoBehaviour
     private ClientWebSocket websocket;
     private ConcurrentQueue<string> commandQueue = new ConcurrentQueue<string>();
     private string lastStatus = "";
+    private bool isRegistered = false;
+    private bool isSending = false; 
+    private float lastSendTime = 0f;
+    private const float sendInterval = 0.1f; 
 
     async void Start()
     {
+        // 1. 초기 상태 설정
         leftEyeGroup.SetActive(false);
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
+
+        // 2. 양안 분리 레이어 설정 (코드에서 강제 할당)
+        SetLayerRecursively(leftEyeGroup, leftLayer);
+        SetLayerRecursively(rightEyeGroup, rightLayer);
+
+        // 3. 카메라 컬링 마스크 설정
+        int commonMask = (1 << 0) | (1 << 5); // Default + UI
+        if (leftCamera != null) leftCamera.cullingMask = commonMask | (1 << leftLayer);
+        if (rightCamera != null) rightCamera.cullingMask = commonMask | (1 << rightLayer);
+
+        // 4. 사각형 크기 키우기
+        ScaleAllQuads(leftQuads, targetScale);
+        ScaleAllQuads(rightQuads, targetScale);
         
         lastStatus = "📡 서버 자동 탐지 중...";
         if (statusText != null) statusText.text = lastStatus;
         
-        // 💡 고정 IP 대신 자동 탐색을 수행합니다.
         await DiscoverServerIP();
         await ConnectToServer();
+    }
+
+    private void SetLayerRecursively(GameObject obj, int newLayer)
+    {
+        if (null == obj) return;
+        obj.layer = newLayer;
+        foreach (Transform child in obj.transform)
+        {
+            SetLayerRecursively(child.gameObject, newLayer);
+        }
+    }
+
+    private void ScaleAllQuads(Renderer[] quads, float scale)
+    {
+        foreach (var r in quads)
+        {
+            if (r != null) r.transform.localScale = new Vector3(scale, scale, 1f);
+        }
     }
 
     private async Task DiscoverServerIP()
     {
         Debug.Log("📡 UDP 브로드캐스트 대기 중 (Port: 50002)...");
-        
         using (UdpClient udpClient = new UdpClient())
         {
-            // 💡 동일 PC에서 여러 프로세스가 포트를 공유할 수 있도록 설정 (로컬 테스트 시 필수)
             udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 50002));
-
             using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10))) 
             {
                 try
                 {
-                    // 비동기 수신 시작
                     var receiveTask = udpClient.ReceiveAsync();
-                    
-                    // Task.WhenAny를 사용하여 타임아웃 처리
                     var completedTask = await Task.WhenAny(receiveTask, Task.Delay(-1, cts.Token));
-
                     if (completedTask == receiveTask)
                     {
                         var result = await receiveTask;
                         string message = Encoding.UTF8.GetString(result.Buffer);
-                        Debug.Log($"📩 UDP 수신 성공: {message} (From: {result.RemoteEndPoint})");
-
                         if (message.StartsWith("EYE_SERVER:"))
                         {
                             string[] parts = message.Split(':');
                             serverIP = parts[1];
-                            if (parts.Length > 2)
-                            {
-                                int.TryParse(parts[2], out serverPort);
-                            }
+                            if (parts.Length > 2) int.TryParse(parts[2], out serverPort);
                             Debug.Log($"✅ 서버 발견: {serverIP}:{serverPort}");
                         }
                     }
-                    else
-                    {
-                        Debug.LogWarning("⚠️ UDP 탐색 타임아웃: 10초 동안 서버 신호를 받지 못했습니다.");
-                    }
                 }
-                catch (OperationCanceledException)
-                {
-                    Debug.LogWarning("⚠️ UDP 탐색 취소됨 (타임아웃)");
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"❌ UDP Error: {e.Message}");
-                }
+                catch (Exception e) { Debug.LogError($"❌ UDP Error: {e.Message}"); }
             }
         }
     }
 
     private async Task ConnectToServer()
     {
-        if (statusText != null) statusText.text = $"📡 연결 시도 중...\n({serverIP}:{serverPort})";
-        
-        // 1. 발견된 포트로 직접 연결 시도
         bool connected = await TryConnect($"ws://{serverIP}:{serverPort}/ws");
-        
-        // 2. 실패 시 80 포트(프록시) 폴백 시도
-        if (!connected && serverPort != 80)
-        {
-            if (statusText != null) statusText.text = $"⚠️ 직접 연결 실패.\n프록시(80 포트)로 우회 접속 시도 중...";
-            Debug.Log($"⚠️ {serverPort} 포트 연결 실패, 80 포트(/vr/ws)로 폴백 접속 시도");
-            connected = await TryConnect($"ws://{serverIP}/vr/ws");
-        }
+        if (!connected && serverPort != 80) connected = await TryConnect($"ws://{serverIP}/vr/ws");
 
         if (connected)
         {
-            if (statusText != null) statusText.text = "✅ 연결 성공!\n키보드 C, 엔터, 스페이스바를 누르세요.";
-            UpdateStartScreenText(); 
-            SendStateToServer();     
-            ReceiveMessages();
-        }
-        else
-        {
-             if (statusText != null) statusText.text = $"❌ 모든 연결 시도 실패.\n방화벽, 포트(80, 12346) 설정을 확인하세요.";
+            try {
+                string deviceId = SystemInfo.deviceUniqueIdentifier;
+                byte[] regMsg = Encoding.UTF8.GetBytes($"REG:{deviceId}");
+                await websocket.SendAsync(new ArraySegment<byte>(regMsg), WebSocketMessageType.Text, true, CancellationToken.None);
+                isRegistered = true; 
+                lastSendTime = Time.time;
+                UpdateStartScreenText(); 
+                SendStateToServer();     
+                ReceiveMessages();
+            } catch (Exception e) { Debug.LogError($"❌ 등록 프로세스 에러: {e.Message}"); }
         }
     }
 
     private async Task<bool> TryConnect(string url)
     {
-        websocket = new ClientWebSocket();
-        try
-        {
-            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3))) // 3초 타임아웃
-            {
+        try {
+            websocket = new ClientWebSocket();
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3))) {
                 await websocket.ConnectAsync(new Uri(url), cts.Token);
                 return websocket.State == WebSocketState.Open;
             }
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"❌ {url} 연결 실패: {e.GetType().Name} - {e.Message}");
-            if (e.InnerException != null)
-            {
-                Debug.LogWarning($"   Inner Exception: {e.InnerException.Message}");
-            }
-            return false;
-        }
+        } catch { return false; }
     }
 
     private async void ReceiveMessages()
     {
-        byte[] buffer = new byte[1024];
+        byte[] buffer = new byte[2048];
         while (websocket != null && websocket.State == WebSocketState.Open)
         {
-            try
-            {
+            try {
                 var result = await websocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                if (result.MessageType == WebSocketMessageType.Text)
-                {
+                if (result.MessageType == WebSocketMessageType.Text) {
                     string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    commandQueue.Enqueue(message);
+                    if (!string.IsNullOrEmpty(message)) commandQueue.Enqueue(message);
                 }
-            }
-            catch { break; }
+                else if (result.MessageType == WebSocketMessageType.Close) break;
+            } catch { break; }
         }
     }
 
     void Update()
     {
-        while (commandQueue.TryDequeue(out string command))
-        {
-            ProcessCommand(command);
-        }
-
+        while (commandQueue.TryDequeue(out string command)) ProcessCommand(command);
         HandlePhysicalInput();
     }
-
-    private float lastAxisTime = 0f;
-    private const float AXIS_DELAY = 0.2f;
 
     void HandlePhysicalInput()
     {
         bool btnA = Input.GetKeyDown("joystick button 0"); 
         bool btnB = Input.GetKeyDown("joystick button 1"); 
         bool trigger = Input.GetKeyDown("joystick button 14") || Input.GetKeyDown("joystick button 15") || Input.GetMouseButtonDown(0);
-
         bool keyStart2 = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.LeftControl);
         bool keyStart4 = Input.GetKeyDown(KeyCode.Space);
-        
-        bool keyToggleEye = Input.GetKeyDown(KeyCode.LeftControl); 
-        bool keyChangeColor = Input.GetKeyDown(KeyCode.Space);     
-        bool keyChangeTarget = Input.GetKeyDown(KeyCode.Escape);   
-        
-        bool keyBrightUp = Input.GetKeyDown(KeyCode.UpArrow);
-        bool keyBrightDown = Input.GetKeyDown(KeyCode.DownArrow);
 
         if (currentState == AppState.ModeSelection)
         {
-            if (trigger || btnA || keyStart2)
-            {
-                divisionMode = 2; StartTest();
-            }
-            else if (btnB || Input.GetKeyDown("joystick button 9") || keyStart4)
-            {
-                divisionMode = 4; StartTest();
-            }
+            if (trigger || btnA || keyStart2) { divisionMode = 2; StartTest(); }
+            else if (btnB || Input.GetKeyDown("joystick button 9") || keyStart4) { divisionMode = 4; StartTest(); }
             return;
         }
 
-        float wheel = Input.GetAxis("Mouse ScrollWheel");
-        float vertical = Input.GetAxis("Vertical");
-
-        // 💡 아날로그 조이스틱 입력을 제어하여 무한 루프(충돌) 방지
-        bool axisUp = vertical > 0.7f && Time.time - lastAxisTime > AXIS_DELAY;
-        bool axisDown = vertical < -0.7f && Time.time - lastAxisTime > AXIS_DELAY;
-
-        if (keyBrightUp || wheel > 0.01f || axisUp) 
-        {
-            ProcessCommand("BRIGHT_UP");
-            if (axisUp) lastAxisTime = Time.time;
-        }
-        else if (keyBrightDown || wheel < -0.01f || axisDown) 
-        {
-            ProcessCommand("BRIGHT_DOWN");
-            if (axisDown) lastAxisTime = Time.time;
-        }
-
-        if (trigger || keyToggleEye) ProcessCommand("EYE_TARGET_TOGGLE");
-        if (Input.GetKeyDown("joystick button 2") || Input.GetKeyDown("joystick button 9") || keyChangeColor) ProcessCommand("CHANGE_COLOR");
-        if (btnB || keyChangeTarget) ProcessCommand("CHANGE_TARGET");
+        if (Input.GetKeyDown(KeyCode.UpArrow)) ProcessCommand("BRIGHT_UP");
+        if (Input.GetKeyDown(KeyCode.DownArrow)) ProcessCommand("BRIGHT_DOWN");
+        if (Input.GetKeyDown(KeyCode.LeftControl)) ProcessCommand("EYE_TARGET_TOGGLE");
+        if (Input.GetKeyDown(KeyCode.Space)) ProcessCommand("CHANGE_COLOR");
+        if (Input.GetKeyDown(KeyCode.Escape)) ProcessCommand("CHANGE_TARGET");
     }
 
     void StartTest()
     {
         currentState = AppState.Testing;
-        if (crosshair != null) crosshair.SetActive(false); 
+        if (statusText != null) statusText.gameObject.SetActive(false); 
+        if (crosshair != null) crosshair.SetActive(true); 
         Apply();
     }
 
     void ProcessCommand(string cmd)
     {
-        // 💡 알 수 없는 명령어(DEVICE_LIST, JSON 데이터 등) 무시 처리
         if (cmd.StartsWith("DEVICE_LIST:") || cmd.StartsWith("{")) return;
-        // 💡 웹 UI에서 원격으로 명령이 내려오면, 즉시 대기 화면을 끝내고 테스트 모드로 자동 진입합니다.
-        if (currentState == AppState.ModeSelection)
-        {
-            StartTest();
-        }
+        if (currentState == AppState.ModeSelection) StartTest();
 
         if (cmd.StartsWith("SET_VAL:"))
         {
@@ -297,12 +250,10 @@ public class VRController : MonoBehaviour
             {
                 string target = parts[1];
                 int value = Mathf.Clamp(int.Parse(parts[2]), 0, 100);
-                
                 if (target == "L_NASAL") leftNasal = value;
                 else if (target == "L_TEMP") leftTemporal = value;
                 else if (target == "R_NASAL") rightNasal = value;
                 else if (target == "R_TEMP") rightTemporal = value;
-                
                 else if (target == "Q0") quadBrightness[0] = value;
                 else if (target == "Q1") quadBrightness[1] = value;
                 else if (target == "Q2") quadBrightness[2] = value;
@@ -343,38 +294,30 @@ public class VRController : MonoBehaviour
             if (adjustMode != 0)
             {
                 int targetIdx = adjustMode - 1;
-                for (int i = 0; i < 4; i++)
-                {
+                for (int i = 0; i < 4; i++) {
                     if (i == targetIdx) quadBrightness[i] = 30;
                     else quadBrightness[i] = 80;
                 }
-            }
-            else
-            {
-                for (int i = 0; i < 4; i++) quadBrightness[i] = 50;
-            }
+            } else { for (int i = 0; i < 4; i++) quadBrightness[i] = 50; }
         }
     }
 
     void ChangeBrightness(int amount)
     {
-        int maxLevel = 100;
-        if (divisionMode == 2)
-        {
-            if (adjustMode == 0 || adjustMode == 1) { leftNasal = Mathf.Clamp(leftNasal + amount, 0, maxLevel); rightNasal = Mathf.Clamp(rightNasal + amount, 0, maxLevel); }
-            if (adjustMode == 0 || adjustMode == 2) { leftTemporal = Mathf.Clamp(leftTemporal + amount, 0, maxLevel); rightTemporal = Mathf.Clamp(rightTemporal + amount, 0, maxLevel); }
-        }
-        else
-        {
-            if (adjustMode == 0)
-            {
-                for (int i = 0; i < 4; i++) quadBrightness[i] = Mathf.Clamp(quadBrightness[i] + amount, 0, maxLevel);
+        bool affectLeft = (currentEyeTarget == 0 || currentEyeTarget == 2);
+        bool affectRight = (currentEyeTarget == 1 || currentEyeTarget == 2);
+        if (divisionMode == 2) {
+            if (adjustMode == 0 || adjustMode == 1) {
+                if (affectLeft) leftNasal = Mathf.Clamp(leftNasal + amount, 0, 100);
+                if (affectRight) rightNasal = Mathf.Clamp(rightNasal + amount, 0, 100);
             }
-            else
-            {
-                int idx = adjustMode - 1;
-                quadBrightness[idx] = Mathf.Clamp(quadBrightness[idx] + amount, 0, maxLevel);
+            if (adjustMode == 0 || adjustMode == 2) {
+                if (affectLeft) leftTemporal = Mathf.Clamp(leftTemporal + amount, 0, 100);
+                if (affectRight) rightTemporal = Mathf.Clamp(rightTemporal + amount, 0, 100);
             }
+        } else {
+            if (adjustMode == 0) for (int i = 0; i < 4; i++) quadBrightness[i] = Mathf.Clamp(quadBrightness[i] + amount, 0, 100);
+            else { int idx = adjustMode - 1; quadBrightness[idx] = Mathf.Clamp(quadBrightness[idx] + amount, 0, 100); }
         }
     }
 
@@ -385,26 +328,19 @@ public class VRController : MonoBehaviour
         leftEyeGroup.SetActive(isLeftActive);
         rightEyeGroup.SetActive(isRightActive);
         
-        bool isBinocular = (currentEyeTarget == 2);
-
-        if (leftCamera != null) leftCamera.cullingMask = isLeftActive ? -1 : 0;
-        if (rightCamera != null) rightCamera.cullingMask = isRightActive ? -1 : 0;
-
         if (divisionMode == 2)
         {
             Color lNasalColor = baseColors[currentColorIndex] * (leftNasal / 100.0f); lNasalColor.a = 1f;
             Color lTempColor = baseColors[currentColorIndex] * (leftTemporal / 100.0f); lTempColor.a = 1f;
             Color rNasalColor = baseColors[currentColorIndex] * (rightNasal / 100.0f); rNasalColor.a = 1f;
             Color rTempColor = baseColors[currentColorIndex] * (rightTemporal / 100.0f); rTempColor.a = 1f;
-            
             if (isLeftActive) ApplyBiColor(leftQuads, lNasalColor, lTempColor, true);
             if (isRightActive) ApplyBiColor(rightQuads, rNasalColor, rTempColor, false);
         }
         else
         {
             Color[] qColors = new Color[4];
-            for (int i = 0; i < 4; i++)
-            {
+            for (int i = 0; i < 4; i++) {
                 qColors[i] = baseColors[currentColorIndex] * (quadBrightness[i] / 100.0f); qColors[i].a = 1f;
             }
             if (isLeftActive) ApplyQuadColor(leftQuads, qColors);
@@ -415,14 +351,8 @@ public class VRController : MonoBehaviour
 
     void ApplyBiColor(Renderer[] quads, Color nasalColor, Color temporalColor, bool isLeft)
     {
-        // 0:우상, 1:우하, 2:좌상, 3:좌하
-        // 왼쪽 눈 (isLeft=true): 오른쪽(0,1)이 코쪽(Nasal), 왼쪽(2,3)이 귀쪽(Temporal)
-        // 오른쪽 눈 (isLeft=false): 오른쪽(0,1)이 귀쪽(Temporal), 왼쪽(2,3)이 코쪽(Nasal)
-        
         if (quads == null || quads.Length < 4) return;
-
         bool isNasalRightSide = isLeft; 
-
         if (quads[0] != null) quads[0].material.color = isNasalRightSide ? nasalColor : temporalColor;
         if (quads[1] != null) quads[1].material.color = isNasalRightSide ? nasalColor : temporalColor;
         if (quads[2] != null) quads[2].material.color = isNasalRightSide ? temporalColor : nasalColor;
@@ -431,9 +361,7 @@ public class VRController : MonoBehaviour
 
     void ApplyQuadColor(Renderer[] quads, Color[] c)
     {
-        // c[0]=우상, c[1]=우하, c[2]=좌상, c[3]=좌하
         if (quads == null || quads.Length < 4) return;
-
         if (quads[0] != null) quads[0].material.color = c[0];
         if (quads[1] != null) quads[1].material.color = c[1];
         if (quads[2] != null) quads[2].material.color = c[2];
@@ -443,55 +371,46 @@ public class VRController : MonoBehaviour
     void UpdateStartScreenText()
     {
         lastStatus = "<b>[ 검사 대기 중 ]</b>\n트리거: 2분면 / 앱버튼: 4분면";
-        if (statusText != null) statusText.text = ""; 
+        if (statusText != null) statusText.text = lastStatus; 
         SendStateToServer();
     }
 
     void UpdateStatusText()
     {
         if (currentState == AppState.ModeSelection) return;
-        
         int targetBright = (divisionMode == 2) ? leftNasal : quadBrightness[(adjustMode == 0 ? 0 : adjustMode - 1)];
-        float currentPercent = targetBright / 100f;
-        float currentLux = (MAX_NITS * Mathf.Pow(currentPercent, GAMMA)) * PI;
-
         string modeStr = (divisionMode == 2)
             ? (adjustMode == 0 ? "양쪽 제어" : (adjustMode == 1 ? "코쪽 제어" : "귀쪽 제어"))
             : (adjustMode == 0 ? "전체 조절" : $"{quadNames[adjustMode - 1]} 조절");
-
         lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}";
-        if (statusText != null) statusText.text = ""; 
+        if (statusText != null) statusText.text = lastStatus; 
         SendStateToServer();
     }
 
     private async void SendStateToServer()
     {
-        if (websocket != null && websocket.State == WebSocketState.Open)
-        {
-            VRStateData data = new VRStateData
-            {
-                divMode = divisionMode,
-                colorIdx = currentColorIndex,
-                leftNasal = leftNasal,
-                leftTemporal = leftTemporal,
-                rightNasal = rightNasal,
-                rightTemporal = rightTemporal,
-                q0 = quadBrightness[0],
-                q1 = quadBrightness[1],
-                q2 = quadBrightness[2],
-                q3 = quadBrightness[3],
-                uiText = string.IsNullOrEmpty(lastStatus) ? "VR 기기 연동 완료" : lastStatus,
-                currentEyeTarget = currentEyeTarget
+        if (!isRegistered || websocket == null || websocket.State != WebSocketState.Open) return;
+        if (isSending || (Time.time - lastSendTime) < sendInterval) return;
+        isSending = true; lastSendTime = Time.time;
+        try {
+            VRStateData data = new VRStateData {
+                divMode = divisionMode, colorIdx = currentColorIndex,
+                leftNasal = leftNasal, leftTemporal = leftTemporal,
+                rightNasal = rightNasal, rightTemporal = rightTemporal,
+                q0 = quadBrightness[0], q1 = quadBrightness[1], q2 = quadBrightness[2], q3 = quadBrightness[3],
+                uiText = lastStatus, currentEyeTarget = currentEyeTarget
             };
-            byte[] bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
-            await websocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
-        }
+            string json = JsonUtility.ToJson(data);
+            if (!string.IsNullOrEmpty(json)) {
+                byte[] buffer = Encoding.UTF8.GetBytes(json);
+                await websocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
+            }
+        } catch {} finally { isSending = false; }
     }
 
     private async void OnDestroy()
     {
-        if (websocket != null && websocket.State == WebSocketState.Open)
-        {
+        if (websocket != null && websocket.State == WebSocketState.Open) {
             await websocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Done", CancellationToken.None);
         }
     }
