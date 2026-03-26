@@ -7,13 +7,16 @@ const App = () => {
     leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
     q0: 50, q1: 50, q2: 50, q3: 50,
     uiText: "VR 기기의 신호를 기다리고 있습니다...",
-    currentEyeTarget: 2
+    currentEyeTarget: 2,
+    isFlipMode: false,
+    isLeftEyeShown: true
   });
 
   const [logs, setLogs] = useState([]);
   const [inputVal, setInputVal] = useState({
     leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
-    q0: 80, q1: 80, q2: 30, q3: 80
+    q0: 80, q1: 80, q2: 30, q3: 80,
+    flipInterval: 1.0
   });
   const [connectedDevices, setConnectedDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('ALL');
@@ -140,30 +143,54 @@ const App = () => {
         {vrState.divMode === 2 ? (
           <div style={{ display: 'flex', width: '100%', height: '100%' }}>
             {/* 왼쪽 눈 화면 */}
-            <div style={{ flex: 1, position: 'relative', borderRight: '8px solid #333', opacity: (vrState.currentEyeTarget === 0 || vrState.currentEyeTarget === 2) ? 1 : 0.2 }}>
-              <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftTemporal) }}>
-                <ValueOverlay percent={vrState.leftTemporal} isSmall />
-                <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 귀쪽</div>
-              </div>
-              <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftNasal), borderLeft: '2px solid black' }}>
-                <ValueOverlay percent={vrState.leftNasal} isSmall />
-                <div style={{ position: 'absolute', top: 10, right: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 코쪽</div>
-              </div>
+            <div style={{ 
+              flex: 1, position: 'relative', borderRight: '8px solid #333', 
+              opacity: (vrState.isFlipMode ? (vrState.isLeftEyeShown ? 1 : 0.05) : ((vrState.currentEyeTarget === 0 || vrState.currentEyeTarget === 2) ? 1 : 0.2)) 
+            }}>
+              {vrState.currentEyeTarget === 2 ? (
+                <div style={{ ...styles.quad, left: 0, width: '100%', height: '100%', backgroundColor: getRGB(vrState.leftNasal) }}>
+                  <ValueOverlay percent={vrState.leftNasal} isSmall />
+                  <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 단색</div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftTemporal) }}>
+                    <ValueOverlay percent={vrState.leftTemporal} isSmall />
+                    <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 귀쪽</div>
+                  </div>
+                  <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.leftNasal), borderLeft: '2px solid black' }}>
+                    <ValueOverlay percent={vrState.leftNasal} isSmall />
+                    <div style={{ position: 'absolute', top: 10, right: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>좌안 코쪽</div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* 가상 격벽 시뮬레이션 선 */}
             <div style={{ width: '16px', backgroundColor: '#111', zIndex: 20 }}></div>
 
             {/* 오른쪽 눈 화면 */}
-            <div style={{ flex: 1, position: 'relative', borderLeft: '8px solid #333', opacity: (vrState.currentEyeTarget === 1 || vrState.currentEyeTarget === 2) ? 1 : 0.2 }}>
-              <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightNasal), borderRight: '2px solid black' }}>
-                <ValueOverlay percent={vrState.rightNasal} isSmall />
-                <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 코쪽</div>
-              </div>
-              <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightTemporal) }}>
-                <ValueOverlay percent={vrState.rightTemporal} isSmall />
-                <div style={{ position: 'absolute', top: 10, right: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 귀쪽</div>
-              </div>
+            <div style={{ 
+              flex: 1, position: 'relative', borderLeft: '8px solid #333', 
+              opacity: (vrState.isFlipMode ? (!vrState.isLeftEyeShown ? 1 : 0.05) : ((vrState.currentEyeTarget === 1 || vrState.currentEyeTarget === 2) ? 1 : 0.2)) 
+            }}>
+              {vrState.currentEyeTarget === 2 ? (
+                <div style={{ ...styles.quad, left: 0, width: '100%', height: '100%', backgroundColor: getRGB(vrState.rightNasal) }}>
+                  <ValueOverlay percent={vrState.rightNasal} isSmall />
+                  <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 단색</div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ ...styles.quad, left: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightNasal), borderRight: '2px solid black' }}>
+                    <ValueOverlay percent={vrState.rightNasal} isSmall />
+                    <div style={{ position: 'absolute', top: 10, left: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 코쪽</div>
+                  </div>
+                  <div style={{ ...styles.quad, right: 0, width: '50%', height: '100%', backgroundColor: getRGB(vrState.rightTemporal) }}>
+                    <ValueOverlay percent={vrState.rightTemporal} isSmall />
+                    <div style={{ position: 'absolute', top: 10, right: 10, color: 'white', fontWeight: 'bold', textShadow: '1px 1px 2px black' }}>우안 귀쪽</div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -228,10 +255,51 @@ const App = () => {
             </div>
             <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginTop: '10px' }} onClick={() => sendCommand('CHANGE_COLOR')}>색상 변경 (Space)</button>
             <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginTop: '10px' }} onClick={() => sendCommand('CHANGE_TARGET')}>타겟 영역 변경 (Enter)</button>
+            
+            {/* 검사 모드 선택 */}
+            <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#334155' }}>📌 화면 분할 모드 변경</div>
+              <div style={styles.btnRow}>
+                <button 
+                  style={{ ...styles.btn, flex: 1, backgroundColor: vrState.divMode === 2 ? '#10b981' : '#e2e8f0', color: vrState.divMode === 2 ? 'white' : 'black' }} 
+                  onClick={() => sendCommand('MODE_2')}>2분면 모드</button>
+                <button 
+                  style={{ ...styles.btn, flex: 1, backgroundColor: vrState.divMode === 4 ? '#10b981' : '#e2e8f0', color: vrState.divMode === 4 ? 'white' : 'black' }} 
+                  onClick={() => sendCommand('MODE_4')}>4분면 모드</button>
+              </div>
+            </div>
+
             <div style={{ marginTop: '15px' }}>
               <button style={{ ...styles.btn, backgroundColor: '#3b82f6', color: 'white', width: '100%', marginBottom: '6px', fontSize: '18px' }} onClick={() => sendCommand('BRIGHT_UP')}>▲ 일괄 밝기 +2% (↑)</button>
               <button style={{ ...styles.btn, backgroundColor: '#3b82f6', color: 'white', width: '100%', fontSize: '18px' }} onClick={() => sendCommand('BRIGHT_DOWN')}>▼ 일괄 밝기 -2% (↓)</button>
             </div>
+
+            {/* 🔥 플립 모드 제어 */}
+            <div style={styles.controlGroup}>
+              <div style={styles.groupHeader}>🔄 플립 모드 (2분면 양안 한정)</div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <button 
+                  style={{ ...styles.btn, flex: 2, backgroundColor: vrState.isFlipMode ? '#ef4444' : '#10b981', color: 'white' }} 
+                  onClick={() => sendCommand('TOGGLE_FLIP')}
+                >
+                  {vrState.isFlipMode ? '⏹ 플립 중지' : '▶ 플립 시작'}
+                </button>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="number" step="0.1" min="0.1" 
+                    value={inputVal.flipInterval} 
+                    onChange={e => setInputVal({...inputVal, flipInterval: e.target.value})} 
+                    style={{...styles.smallInput, width: '100%'}} 
+                  />
+                  <small style={{fontSize: '10px'}}>초</small>
+                </div>
+                <button 
+                  style={{...styles.setBtn, padding: '0 8px'}} 
+                  onClick={() => sendCommand(`SET_FLIP_INTERVAL:${inputVal.flipInterval}`)}
+                >Set</button>
+              </div>
+            </div>
+
             {/* 💡 [핵심] 수치 직접 입력 섹션 */}
             <div style={styles.controlGroup}>
               <div style={{ ...styles.groupHeader, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -240,37 +308,57 @@ const App = () => {
               </div>
 
               {vrState.divMode === 2 ? (
-                /* 2분면용 독립 양안 입력창 */
+                /* 2분면용 입력창: 양안 모드일 때는 단색, 단안일 때는 코/귀 분리 */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* 좌안 패널 */}
-                  <div style={styles.eyePanel}>
-                    <div style={styles.eyeTitle}>[ 좌 안 ]</div>
-                    <div style={styles.inputRow}>
-                      <span style={{ width: '35px', fontSize: '12px' }}>코쪽</span>
-                      <input type="number" value={inputVal.leftNasal} onChange={e => setInputVal({ ...inputVal, leftNasal: e.target.value })} style={styles.smallInput} />
-                      <button style={styles.setBtn} onClick={() => sendVal('L_NASAL', inputVal.leftNasal)}>Set</button>
-                    </div>
-                    <div style={styles.inputRow}>
-                      <span style={{ width: '35px', fontSize: '12px' }}>귀쪽</span>
-                      <input type="number" value={inputVal.leftTemporal} onChange={e => setInputVal({ ...inputVal, leftTemporal: e.target.value })} style={styles.smallInput} />
-                      <button style={styles.setBtn} onClick={() => sendVal('L_TEMP', inputVal.leftTemporal)}>Set</button>
-                    </div>
-                  </div>
-
-                  {/* 우안 패널 */}
-                  <div style={styles.eyePanel}>
-                    <div style={{ ...styles.eyeTitle, color: '#0284c7' }}>[ 우 안 ]</div>
-                    <div style={styles.inputRow}>
-                      <span style={{ width: '35px', fontSize: '12px' }}>코쪽</span>
-                      <input type="number" value={inputVal.rightNasal} onChange={e => setInputVal({ ...inputVal, rightNasal: e.target.value })} style={styles.smallInput} />
-                      <button style={styles.setBtn} onClick={() => sendVal('R_NASAL', inputVal.rightNasal)}>Set</button>
-                    </div>
-                    <div style={styles.inputRow}>
-                      <span style={{ width: '35px', fontSize: '12px' }}>귀쪽</span>
-                      <input type="number" value={inputVal.rightTemporal} onChange={e => setInputVal({ ...inputVal, rightTemporal: e.target.value })} style={styles.smallInput} />
-                      <button style={styles.setBtn} onClick={() => sendVal('R_TEMP', inputVal.rightTemporal)}>Set</button>
-                    </div>
-                  </div>
+                  {vrState.currentEyeTarget === 2 ? (
+                    <>
+                      <div style={styles.eyePanel}>
+                        <div style={styles.eyeTitle}>[ 좌 안 (양안모드 단색) ]</div>
+                        <div style={styles.inputRow}>
+                          <span style={{ width: '35px', fontSize: '12px' }}>밝기</span>
+                          <input type="number" value={inputVal.leftNasal} onChange={e => setInputVal({ ...inputVal, leftNasal: e.target.value })} style={styles.smallInput} />
+                          <button style={styles.setBtn} onClick={() => sendVal('L_ALL', inputVal.leftNasal)}>Set</button>
+                        </div>
+                      </div>
+                      <div style={styles.eyePanel}>
+                        <div style={{ ...styles.eyeTitle, color: '#0284c7' }}>[ 우 안 (양안모드 단색) ]</div>
+                        <div style={styles.inputRow}>
+                          <span style={{ width: '35px', fontSize: '12px' }}>밝기</span>
+                          <input type="number" value={inputVal.rightNasal} onChange={e => setInputVal({ ...inputVal, rightNasal: e.target.value })} style={styles.smallInput} />
+                          <button style={styles.setBtn} onClick={() => sendVal('R_ALL', inputVal.rightNasal)}>Set</button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={styles.eyePanel}>
+                        <div style={styles.eyeTitle}>[ 좌 안 (분할) ]</div>
+                        <div style={styles.inputRow}>
+                          <span style={{ width: '35px', fontSize: '12px' }}>코쪽</span>
+                          <input type="number" value={inputVal.leftNasal} onChange={e => setInputVal({ ...inputVal, leftNasal: e.target.value })} style={styles.smallInput} />
+                          <button style={styles.setBtn} onClick={() => sendVal('L_NASAL', inputVal.leftNasal)}>Set</button>
+                        </div>
+                        <div style={styles.inputRow}>
+                          <span style={{ width: '35px', fontSize: '12px' }}>귀쪽</span>
+                          <input type="number" value={inputVal.leftTemporal} onChange={e => setInputVal({ ...inputVal, leftTemporal: e.target.value })} style={styles.smallInput} />
+                          <button style={styles.setBtn} onClick={() => sendVal('L_TEMP', inputVal.leftTemporal)}>Set</button>
+                        </div>
+                      </div>
+                      <div style={styles.eyePanel}>
+                        <div style={{ ...styles.eyeTitle, color: '#0284c7' }}>[ 우 안 (분할) ]</div>
+                        <div style={styles.inputRow}>
+                          <span style={{ width: '35px', fontSize: '12px' }}>코쪽</span>
+                          <input type="number" value={inputVal.rightNasal} onChange={e => setInputVal({ ...inputVal, rightNasal: e.target.value })} style={styles.smallInput} />
+                          <button style={styles.setBtn} onClick={() => sendVal('R_NASAL', inputVal.rightNasal)}>Set</button>
+                        </div>
+                        <div style={styles.inputRow}>
+                          <span style={{ width: '35px', fontSize: '12px' }}>귀쪽</span>
+                          <input type="number" value={inputVal.rightTemporal} onChange={e => setInputVal({ ...inputVal, rightTemporal: e.target.value })} style={styles.smallInput} />
+                          <button style={styles.setBtn} onClick={() => sendVal('R_TEMP', inputVal.rightTemporal)}>Set</button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 /* 4분면용 입력창 (2x2 그리드 배치) */

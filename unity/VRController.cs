@@ -8,6 +8,12 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.XR;
+using UnityEngine.InputSystem.Controls;
+using System.Linq;
+using System.Collections.Generic;
+using UnityEngine.XR;
 
 [System.Serializable]
 public class VRStateData
@@ -21,6 +27,8 @@ public class VRStateData
     public int q0, q1, q2, q3;
     public string uiText;
     public int currentEyeTarget;
+    public bool isFlipMode;
+    public bool isLeftEyeShown;
 }
 
 public class VRController : MonoBehaviour
@@ -46,6 +54,7 @@ public class VRController : MonoBehaviour
 
     [Header("시각 고도화 설정")]
     public float targetScale = 1.8f;   // 사각형 크기
+    public float targetDistance = 5.0f; // 카메라 앞 Z축 거리 (원하는 만큼 수정 가능)
     public int leftLayer = 30;      // 좌안 전용 (Unity Editor에서 미리 생성 권장)
     public int rightLayer = 31;     // 우안 전용 (Unity Editor에서 미리 생성 권장)
 
@@ -70,6 +79,18 @@ public class VRController : MonoBehaviour
     private const float MAX_NITS = 87f;
     private const float GAMMA = 2.2f;
     private const float PI = 3.14159f;
+    
+    [Header("플립 모드 설정")]
+    private bool isFlipMode = false;
+    private float flipInterval = 1.0f;
+    private float nextFlipTime = 0f;
+    private bool isLeftEyeShown = true;
+
+    // Quest 컨트롤러 이전 프레임 상태 저장용
+    private bool prevBtnA = false;
+    private bool prevBtnB = false;
+    private bool prevTrigger = false;
+    private bool prevGrip = false;
 
     private ClientWebSocket websocket;
     private ConcurrentQueue<string> commandQueue = new ConcurrentQueue<string>();
@@ -86,24 +107,57 @@ public class VRController : MonoBehaviour
         rightEyeGroup.SetActive(false);
         if (crosshair != null) crosshair.SetActive(false);
 
+        // 1-1. 하이라키 자동 정렬 및 Z축 거리 확보 (거리 조절 시 이 값이 쓰임)
+        if (leftCamera != null) {
+            leftEyeGroup.transform.parent = leftCamera.transform;
+            leftEyeGroup.transform.localPosition = new Vector3(0, 0, targetDistance);
+            leftEyeGroup.transform.localEulerAngles = Vector3.zero;
+        }
+        if (rightCamera != null) {
+            rightEyeGroup.transform.parent = rightCamera.transform;
+            rightEyeGroup.transform.localPosition = new Vector3(0, 0, targetDistance);
+            rightEyeGroup.transform.localEulerAngles = Vector3.zero;
+        }
+
         // 2. 양안 분리 레이어 설정 (코드에서 강제 할당)
         SetLayerRecursively(leftEyeGroup, leftLayer);
         SetLayerRecursively(rightEyeGroup, rightLayer);
 
-        // 3. 카메라 컬링 마스크 설정
+        // 3. 카메라 컬링 마스크 및 스테레오 렌더링 타겟 강제 설정 (Quest Single Pass 버그 방지)
         int commonMask = (1 << 0) | (1 << 5); // Default + UI
-        if (leftCamera != null) leftCamera.cullingMask = commonMask | (1 << leftLayer);
-        if (rightCamera != null) rightCamera.cullingMask = commonMask | (1 << rightLayer);
+        if (leftCamera != null) {
+            leftCamera.cullingMask = commonMask | (1 << leftLayer);
+            leftCamera.stereoTargetEye = StereoTargetEyeMask.Left;
+            leftCamera.clearFlags = CameraClearFlags.SolidColor;
+            leftCamera.backgroundColor = Color.black;
+        }
+        if (rightCamera != null) {
+            rightCamera.cullingMask = commonMask | (1 << rightLayer);
+            rightCamera.stereoTargetEye = StereoTargetEyeMask.Right;
+            rightCamera.clearFlags = CameraClearFlags.SolidColor;
+            rightCamera.backgroundColor = Color.black;
+        }
+
+        // 3-1. 유니티 에디터 2D 화면에서 두 카메라가 덮어쓰는 버그를 막기 위해 에디터 화면을 반반으로 나눔
+        if (Application.isEditor)
+        {
+            if (leftCamera != null) leftCamera.rect = new Rect(0f, 0f, 0.5f, 1f);
+            if (rightCamera != null) rightCamera.rect = new Rect(0.5f, 0f, 0.5f, 1f);
+        }
 
         // 4. 사각형 크기 키우기
         ScaleAllQuads(leftQuads, targetScale);
         ScaleAllQuads(rightQuads, targetScale);
         
-        lastStatus = "📡 서버 자동 탐지 중...";
+        lastStatus = "📡 서버 접속 시도 중 (유선/무선)...";
         if (statusText != null) statusText.text = lastStatus;
         
-        await DiscoverServerIP();
+        // 유선(ADB/127.0.0.1) 연결을 최우선으로 시도하면서 백그라운드에서도 탐색 시작
+        DiscoverServerIP(); 
         await ConnectToServer();
+
+        // XR Plugin 관련 로깅 (경고 발생 시 안내용)
+        Debug.Log("ℹ️ 'Unable to start Oculus XR Plugin' 경고는 고글이 PC와 Link(유선/무선)되지 않았거나 Unity 에디터 모드일 때 발생할 수 있습니다. 수치 전송에는 영향이 없습니다.");
     }
 
     private void SetLayerRecursively(GameObject obj, int newLayer)
@@ -126,6 +180,9 @@ public class VRController : MonoBehaviour
 
     private async Task DiscoverServerIP()
     {
+        // 이미 연결되었으면 탐색 건너뜀 (선택 사항)
+        if (websocket != null && websocket.State == WebSocketState.Open) return;
+
         Debug.Log("📡 UDP 브로드캐스트 대기 중 (Port: 50002)...");
         using (UdpClient udpClient = new UdpClient())
         {
@@ -157,11 +214,18 @@ public class VRController : MonoBehaviour
 
     private async Task ConnectToServer()
     {
-        bool connected = await TryConnect($"ws://{serverIP}:{serverPort}/ws");
+        // 1. 유선(ADB) 최우선 시도
+        bool connected = await TryConnect($"ws://127.0.0.1:{serverPort}/ws");
+        
+        // 2. 안되면 기존 serverIP 시도
+        if (!connected) connected = await TryConnect($"ws://{serverIP}:{serverPort}/ws");
+        
+        // 3. 기타 경로 시도
         if (!connected && serverPort != 80) connected = await TryConnect($"ws://{serverIP}/vr/ws");
 
         if (connected)
         {
+            Debug.Log($"✅ 서버 연결 성공! ({websocket.Options.Proxy})");
             try {
                 string deviceId = SystemInfo.deviceUniqueIdentifier;
                 byte[] regMsg = Encoding.UTF8.GetBytes($"REG:{deviceId}");
@@ -205,29 +269,103 @@ public class VRController : MonoBehaviour
     void Update()
     {
         while (commandQueue.TryDequeue(out string command)) ProcessCommand(command);
+
+        // 플립 모드 타이머 (양안 모드일 때만 작동)
+        if (isFlipMode && divisionMode == 2 && currentEyeTarget == 2)
+        {
+            if (Time.time >= nextFlipTime)
+            {
+                isLeftEyeShown = !isLeftEyeShown;
+                nextFlipTime = Time.time + flipInterval;
+                Apply();
+            }
+        }
+
         HandlePhysicalInput();
     }
 
     void HandlePhysicalInput()
     {
-        bool btnA = Input.GetKeyDown("joystick button 0"); 
-        bool btnB = Input.GetKeyDown("joystick button 1"); 
-        bool trigger = Input.GetKeyDown("joystick button 14") || Input.GetKeyDown("joystick button 15") || Input.GetMouseButtonDown(0);
-        bool keyStart2 = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.LeftControl);
-        bool keyStart4 = Input.GetKeyDown(KeyCode.Space);
+        var keyboard = Keyboard.current;
+        var mouse = Mouse.current;
+        
+        bool currA = false, currB = false, currTrigger = false, currGrip = false;
+        Vector2 stick = Vector2.zero;
 
+        // 1. 가동성이 가장 좋은 Legacy XR 장치 먼저 확인 (Quest 한정 100% 인식률)
+        List<UnityEngine.XR.InputDevice> xrDevices = new List<UnityEngine.XR.InputDevice>();
+        UnityEngine.XR.InputDevices.GetDevicesWithCharacteristics(UnityEngine.XR.InputDeviceCharacteristics.Right | UnityEngine.XR.InputDeviceCharacteristics.Controller, xrDevices);
+        
+        if (xrDevices.Count > 0)
+        {
+            var device = xrDevices[0];
+            device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primaryButton, out currA); // A
+            device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.secondaryButton, out currB); // B
+            device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out currTrigger); // Trigger
+            device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.gripButton, out currGrip); // Grip
+            device.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primary2DAxis, out stick); // Stick
+            
+            if (Time.frameCount % 120 == 0) Debug.Log($"🔍 [Legacy XR] 기기명: {device.name} 인식됨.");
+        }
+        else
+        {
+            // 2. Fallback: Input System
+            if (Time.frameCount % 120 == 0) Debug.LogWarning("🔍 [Search Fail] 오른쪽 컨트롤러를 찾을 수 없습니다.");
+        }
+
+        // 프레임 단위 상태 계산 (wasPressedThisFrame 역할 보정)
+        bool btnA = currA && !prevBtnA;
+        bool btnB = currB && !prevBtnB;
+        bool trigger = currTrigger && !prevTrigger;
+        bool grip = currGrip && !prevGrip;
+
+        prevBtnA = currA;
+        prevBtnB = currB;
+        prevTrigger = currTrigger;
+        prevGrip = currGrip;
+
+        // 4. 로컬 키보드 입동 제어 (기존 유지)
+        if (keyboard == null) keyboard = InputSystem.GetDevice<Keyboard>();
+        bool keyStart2 = keyboard != null && (keyboard.enterKey.wasPressedThisFrame || keyboard.cKey.wasPressedThisFrame || keyboard.leftCtrlKey.wasPressedThisFrame);
+        bool keyStart4 = keyboard != null && keyboard.spaceKey.wasPressedThisFrame;
+
+        // 5. 초기 상태 (모드 선택)
         if (currentState == AppState.ModeSelection)
         {
-            if (trigger || btnA || keyStart2) { divisionMode = 2; StartTest(); }
-            else if (btnB || Input.GetKeyDown("joystick button 9") || keyStart4) { divisionMode = 4; StartTest(); }
+            if (btnA || keyStart2) { Debug.Log("🕹️ [Input] 2분면 선택됨"); divisionMode = 2; StartTest(); }
+            else if (btnB || keyStart4) { Debug.Log("🕹️ [Input] 4분면 선택됨"); divisionMode = 4; StartTest(); }
             return;
         }
 
-        if (Input.GetKeyDown(KeyCode.UpArrow)) ProcessCommand("BRIGHT_UP");
-        if (Input.GetKeyDown(KeyCode.DownArrow)) ProcessCommand("BRIGHT_DOWN");
-        if (Input.GetKeyDown(KeyCode.LeftControl)) ProcessCommand("EYE_TARGET_TOGGLE");
-        if (Input.GetKeyDown(KeyCode.Space)) ProcessCommand("CHANGE_COLOR");
-        if (Input.GetKeyDown(KeyCode.Escape)) ProcessCommand("CHANGE_TARGET");
+        // 6. 검사 중 (명령 처리)
+        if (btnA) { Debug.Log("🕹️ [Quest] A 버튼 - 색상 변경"); ProcessCommand("CHANGE_COLOR"); }
+        if (btnB) { Debug.Log("🕹️ [Quest] B 버튼 - 타겟 변경"); ProcessCommand("CHANGE_TARGET"); }
+        if (trigger) { Debug.Log("🕹️ [Quest] 트리거 - 플립 토글"); ProcessCommand("TOGGLE_FLIP"); }
+        if (grip) { Debug.Log("🕹️ [Quest] 그립 - 눈 변경"); ProcessCommand("EYE_TARGET_TOGGLE"); }
+
+        // 조이스틱 상하/좌우
+        if (stick.y > 0.5f && Time.frameCount % 10 == 0) ProcessCommand("BRIGHT_UP");
+        else if (stick.y < -0.5f && Time.frameCount % 10 == 0) ProcessCommand("BRIGHT_DOWN");
+        
+        if (stick.x < -0.7f && Time.frameCount % 20 == 0) ProcessCommand("EYE_LEFT");
+        else if (stick.x > 0.7f && Time.frameCount % 20 == 0) ProcessCommand("EYE_RIGHT");
+
+        // 키보드 입동 제어
+        if (keyboard != null) {
+            if (keyboard.upArrowKey.wasPressedThisFrame) ProcessCommand("BRIGHT_UP");
+            if (keyboard.downArrowKey.wasPressedThisFrame) ProcessCommand("BRIGHT_DOWN");
+            if (keyboard.leftCtrlKey.wasPressedThisFrame) ProcessCommand("EYE_TARGET_TOGGLE");
+            if (keyboard.spaceKey.wasPressedThisFrame) ProcessCommand("CHANGE_COLOR");
+            if (keyboard.escapeKey.wasPressedThisFrame) ProcessCommand("CHANGE_TARGET");
+        }
+
+        // 마우스 휠
+        if (mouse != null)
+        {
+            float scroll = mouse.scroll.y.ReadValue();
+            if (scroll > 0.1f) ProcessCommand("BRIGHT_UP");
+            else if (scroll < -0.1f) ProcessCommand("BRIGHT_DOWN");
+        }
     }
 
     void StartTest()
@@ -241,6 +379,11 @@ public class VRController : MonoBehaviour
     void ProcessCommand(string cmd)
     {
         if (cmd.StartsWith("DEVICE_LIST:") || cmd.StartsWith("{")) return;
+        
+        // 원격 모드 변경 명령 수신
+        if (cmd == "MODE_2") { divisionMode = 2; StartTest(); return; }
+        if (cmd == "MODE_4") { divisionMode = 4; StartTest(); return; }
+
         if (currentState == AppState.ModeSelection) StartTest();
 
         if (cmd.StartsWith("SET_VAL:"))
@@ -263,8 +406,24 @@ public class VRController : MonoBehaviour
             return;
         }
 
+        if (cmd.StartsWith("SET_FLIP_INTERVAL:"))
+        {
+            string[] parts = cmd.Split(':');
+            if (parts.Length == 2 && float.TryParse(parts[1], out float val))
+            {
+                flipInterval = Mathf.Max(0.1f, val);
+                nextFlipTime = Time.time + flipInterval;
+            }
+            return;
+        }
+
         switch (cmd)
         {
+            case "TOGGLE_FLIP":
+                isFlipMode = !isFlipMode;
+                nextFlipTime = Time.time + flipInterval;
+                isLeftEyeShown = true;
+                break;
             case "EYE_LEFT": currentEyeTarget = 0; break;
             case "EYE_RIGHT": currentEyeTarget = 1; break;
             case "EYE_BOTH": currentEyeTarget = 2; break;
@@ -325,6 +484,14 @@ public class VRController : MonoBehaviour
     {
         bool isLeftActive = (currentEyeTarget == 0 || currentEyeTarget == 2);
         bool isRightActive = (currentEyeTarget == 1 || currentEyeTarget == 2);
+        
+        // 플립 모드 적용 (양안일 때만)
+        if (isFlipMode && divisionMode == 2 && currentEyeTarget == 2)
+        {
+            isLeftActive = isLeftEyeShown;
+            isRightActive = !isLeftEyeShown;
+        }
+
         leftEyeGroup.SetActive(isLeftActive);
         rightEyeGroup.SetActive(isRightActive);
         
@@ -334,6 +501,14 @@ public class VRController : MonoBehaviour
             Color lTempColor = baseColors[currentColorIndex] * (leftTemporal / 100.0f); lTempColor.a = 1f;
             Color rNasalColor = baseColors[currentColorIndex] * (rightNasal / 100.0f); rNasalColor.a = 1f;
             Color rTempColor = baseColors[currentColorIndex] * (rightTemporal / 100.0f); rTempColor.a = 1f;
+            
+            // 양안 검사 모드일 경우: 눈을 코/귀로 쪼개지 않고, 좌안은 좌안 전체, 우안은 우안 전체 단색으로 렌더링
+            if (currentEyeTarget == 2)
+            {
+                lTempColor = lNasalColor;
+                rTempColor = rNasalColor;
+            }
+
             if (isLeftActive) ApplyBiColor(leftQuads, lNasalColor, lTempColor, true);
             if (isRightActive) ApplyBiColor(rightQuads, rNasalColor, rTempColor, false);
         }
@@ -382,7 +557,9 @@ public class VRController : MonoBehaviour
         string modeStr = (divisionMode == 2)
             ? (adjustMode == 0 ? "양쪽 제어" : (adjustMode == 1 ? "코쪽 제어" : "귀쪽 제어"))
             : (adjustMode == 0 ? "전체 조절" : $"{quadNames[adjustMode - 1]} 조절");
-        lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}";
+        
+        string flipStatus = isFlipMode ? " | [FLIP]" : "";
+        lastStatus = $"<b>{modeStr}</b> | {targetNames[currentEyeTarget]}{flipStatus}";
         if (statusText != null) statusText.text = lastStatus; 
         SendStateToServer();
     }
@@ -398,7 +575,8 @@ public class VRController : MonoBehaviour
                 leftNasal = leftNasal, leftTemporal = leftTemporal,
                 rightNasal = rightNasal, rightTemporal = rightTemporal,
                 q0 = quadBrightness[0], q1 = quadBrightness[1], q2 = quadBrightness[2], q3 = quadBrightness[3],
-                uiText = lastStatus, currentEyeTarget = currentEyeTarget
+                uiText = lastStatus, currentEyeTarget = currentEyeTarget,
+                isFlipMode = isFlipMode, isLeftEyeShown = isLeftEyeShown
             };
             string json = JsonUtility.ToJson(data);
             if (!string.IsNullOrEmpty(json)) {
