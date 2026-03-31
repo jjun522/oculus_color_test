@@ -70,37 +70,42 @@ async def websocket_endpoint(websocket: WebSocket):
     
     try:
         await websocket.accept()
-        
-        # 1. 일단 WEB으로 등록 시도
-        if web_client:
-            try: await web_client.close()
-            except: pass
-        web_client = websocket
-        role = "WEB"
-        print(f"🩺 [WEB 연결] {client_ip}")
-        await update_web_status() # 현재 VR 상태 즉시 보고
 
+        # 1. 첫 메시지로 VR인지 WEB인지 판별 (VR은 REG:로 시작)
+        first_msg = await websocket.receive_text()
+
+        if first_msg.startswith("REG:"):
+            # VR 기기 연결 - 기존 VR만 끊고, 웹은 유지
+            if vr_client:
+                try: await vr_client.close()
+                except: pass
+            vr_client = websocket
+            vr_id = first_msg.split(":", 1)[1]
+            role = "VR"
+            print(f"👑 [VR 등록] {vr_id}")
+            await update_web_status()
+        else:
+            # 웹 관리자 연결 - 기존 웹만 끊고, VR은 유지
+            if web_client:
+                try: await web_client.close()
+                except: pass
+            web_client = websocket
+            role = "WEB"
+            print(f"🩺 [WEB 연결] {client_ip}")
+            await update_web_status()
+            # 첫 메시지가 명령이면 VR로 전달
+            if vr_client and first_msg:
+                cmd = first_msg
+                if first_msg.startswith("TARGET:"):
+                    parts = first_msg.split(":", 2)
+                    if len(parts) == 3: cmd = parts[2]
+                await vr_client.send_text(cmd)
+
+        # 2. 이후 메시지 중계
         while True:
             data = await websocket.receive_text()
             if not data: continue
 
-            # 2. VR 기기의 자기 소개
-            if data.startswith("REG:"):
-                if role == "WEB" and web_client == websocket:
-                    web_client = None
-                
-                if vr_client:
-                    try: await vr_client.close()
-                    except: pass
-                
-                vr_client = websocket
-                vr_id = data.split(":", 1)[1]
-                role = "VR"
-                print(f"👑 [VR 등록] {vr_id}")
-                await update_web_status() # 웹에 VR 접속 알림
-                continue
-
-            # 3. 데이터 중계
             if role == "VR":
                 if web_client: await web_client.send_text(data)
             elif role == "WEB":
