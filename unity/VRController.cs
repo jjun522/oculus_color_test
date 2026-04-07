@@ -193,21 +193,53 @@ public class SimpleEyeTest : MonoBehaviour
         lastStatus = "서버 접속 시도 중...";
         if (statusText != null) statusText.text = lastStatus;
 
-        // 서버 자동 탐색 및 연결 시도 (병렬 실행으로 10초 대기 방지)
-        _ = DiscoverAndConnect();
+        // 서버 자동 탐색 및 연결 루프 시작 (백그라운드)
+        DiscoverAndConnectLoop();
     }
 
-    async Task DiscoverAndConnect()
+    async void DiscoverAndConnectLoop()
     {
-        // 1. 즉시 로컬/마지막 IP로 연결 시도 (유선 사용자를 위해)
-        await ConnectServer();
-
-        // 2. 연결 안 되었으면 탐색 시작 (무선 사용자를 위해)
-        if (ws == null || ws.State != WebSocketState.Open)
+        while (true)
         {
-            await DiscoverServer();
+            // 이미 연결되어 있다면 대기
+            if (ws != null && ws.State == WebSocketState.Open)
+            {
+                await Task.Delay(5000);
+                continue;
+            }
+
+            // 연결 시도
+            UpdateStatusInVR("서버 연결 시도 중...");
+            
+            // 1. 즉시 로컬/기존 IP 시도
             await ConnectServer();
+
+            // 2. 안 되면 탐색 후 다시 시도
+            if (ws == null || ws.State != WebSocketState.Open)
+            {
+                UpdateStatusInVR("서버 탐색 중 (UDP)...");
+                await DiscoverServer();
+                await ConnectServer();
+            }
+
+            // 실패 시 3초 후 재시도
+            if (ws == null || ws.State != WebSocketState.Open)
+            {
+                UpdateStatusInVR("연결 실패 (3초 후 재시도)");
+                await Task.Delay(3000);
+            }
+            else
+            {
+                UpdateStatusInVR("서버 연결 성공!");
+                await Task.Delay(5000);
+            }
         }
+    }
+
+    void UpdateStatusInVR(string msg)
+    {
+        lastStatus = msg;
+        if (statusText != null) statusText.text = msg;
     }
 
     /// <summary>
@@ -940,31 +972,38 @@ public class SimpleEyeTest : MonoBehaviour
 
         switch (p[1])
         {
-            case "SCALE":          // Quad 크기 변경
+            case "SCALE":
+            case "scale":          // Quad 크기 변경
                 if (float.TryParse(p[2], out float sc))
                 { quadScale = Mathf.Max(0.5f, sc); LayoutAll(); }
                 break;
-            case "DISTANCE":       // Quad 거리 변경
+            case "DISTANCE":
+            case "distance":       // Quad 거리 변경
                 if (float.TryParse(p[2], out float di))
                 { quadDistance = Mathf.Max(1f, di); UpdateDistances(); }
                 break;
-            case "FLIP_INTERVAL":  // 플립 간격 변경
+            case "FLIP_INTERVAL":
+            case "flipInterval":   // 플립 간격 변경
                 if (float.TryParse(p[2], out float fi))
                     flipInterval = Mathf.Max(0.1f, fi);
                 break;
-            case "DEFAULT_BRIGHT": // 기본 밝기 변경
+            case "DEFAULT_BRIGHT":
+            case "defaultBright":  // 기본 밝기 변경
                 if (int.TryParse(p[2], out int db))
                     defaultBright = Mathf.Clamp(db, 0, 100);
                 break;
-            case "TARGET_BRIGHT":  // 타겟 밝기 변경
+            case "TARGET_BRIGHT":
+            case "targetBright":   // 타겟 밝기 변경
                 if (int.TryParse(p[2], out int tb))
                     targetBright = Mathf.Clamp(tb, 0, 100);
                 break;
-            case "BG_BRIGHT":      // 배경 밝기 변경
+            case "BG_BRIGHT":
+            case "bgBright":       // 배경 밝기 변경
                 if (int.TryParse(p[2], out int bb))
                     bgBright = Mathf.Clamp(bb, 0, 100);
                 break;
-            case "COLOR_ORDER":    // 색상 순서 변경 (예: "2,0,1,3")
+            case "COLOR_ORDER":
+            case "colorOrder":     // 색상 순서 변경 (예: "2,0,1,3")
                 var parts = p[2].Split(',');
                 int[] order = new int[parts.Length];
                 for (int i = 0; i < parts.Length; i++)
@@ -1024,7 +1063,8 @@ public class SimpleEyeTest : MonoBehaviour
         {
             udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             udp.Client.Bind(new IPEndPoint(IPAddress.Any, 50002)); // 50002 포트에서 대기
-            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10))) // 10초 타임아웃
+            // 원래 10초 타임아웃이었으나 유선 연결 시 무선 UDP를 찾느라 지연되는 현상을 막기 위해 2초로 단축
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2))) 
             {
                 try
                 {
@@ -1078,7 +1118,7 @@ public class SimpleEyeTest : MonoBehaviour
         try
         {
             ws = new ClientWebSocket();
-            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1.5))) // 빠른 재시도를 위해 3초 -> 1.5초 단축
             {
                 await ws.ConnectAsync(new Uri(url), cts.Token);
                 return ws.State == WebSocketState.Open;

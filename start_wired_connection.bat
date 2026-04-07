@@ -4,7 +4,7 @@ echo [ Oculus USB Wired Connection Helper ]
 echo ==========================================
 echo.
 echo Running 'adb reverse tcp:12346 tcp:12346'...
-adb reverse tcp:12346 tcp:12346
+"C:\Users\user\Desktop\JAEJUN\eye\platform-tools\adb.exe" reverse tcp:12346 tcp:12346
 
 if %errorlevel% neq 0 (
     echo.

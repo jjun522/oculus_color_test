@@ -40,18 +40,40 @@ const App = () => {
   useEffect(() => {
     let ws;
     let reconnectTimer;
+    let isComponentMounted = true;
 
     const connect = () => {
-      const wsPath = window.location.pathname.replace(/\/$/, '');
-      ws = new WebSocket(`ws://${window.location.host}${wsPath}/ws`);
+      if (!isComponentMounted) return;
+      
+      // 이미 연결 시도 중이거나 열려있다면 중복 생성 방지
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+        return;
+      }
+
+      // 중계 서버 포트(12346)로 연결
+      ws = new WebSocket(`ws://${window.location.hostname}:12346/ws`);
       wsRef.current = ws;
-      ws.onopen = () => { setStatus('🟢 정상 연결됨'); addLog('시스템', '서버 연결 성공', '#10b981'); };
-      ws.onclose = () => {
+
+      ws.onopen = () => { 
+        if (!isComponentMounted) return;
+        setStatus('🟢 정상 연결됨'); 
+        addLog('시스템', '서버 연결 성공', '#10b981'); 
+        // 서버에 WEB 클라이언트임을 명시적으로 등록 (서버의 receive_text 대기 해소)
+        // REG: 접두사를 피하여 서버가 VR 기기로 오인하지 않게 함
+        ws.send('WEB_MASTER');
+      };
+
+      ws.onclose = (e) => {
+        wsRef.current = null;
+        if (!isComponentMounted) return;
         setStatus('🔴 연결 끊김 (재연결 중...)');
-        addLog('시스템', '서버 연결 단절 - 3초 후 재연결', '#ef4444');
+        addLog('시스템', `서버 연결 단절 - 3초 후 재연결 (${e.code})`, '#ef4444');
         reconnectTimer = setTimeout(connect, 3000);
       };
-      ws.onerror = () => ws.close();
+
+      ws.onerror = () => {
+        if (ws) ws.close();
+      };
       ws.onmessage = (event) => {
         try {
           const textData = event.data;
@@ -127,6 +149,16 @@ const App = () => {
     return '양안';
   };
   const activeMode = getActiveMode();
+
+  const getBrightnessDiff = () => {
+    if (activeMode === '세로4분' || activeMode === '4분면') return null;
+    const lAvg = (vrState.leftNasal + vrState.leftTemporal) / 2;
+    const rAvg = (vrState.rightNasal + vrState.rightTemporal) / 2;
+    const diff = Math.abs(lAvg - rAvg).toFixed(1);
+    if (diff == 0) return { text: "밝기 동일", color: "#10b981", diff };
+    if (lAvg > rAvg) return { text: `좌안이 ${diff}% 더 밝음`, color: "#e11d48", diff };
+    return { text: `우안이 ${diff}% 더 밝음`, color: "#0284c7", diff };
+  };
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -418,9 +450,20 @@ const App = () => {
 
       {/* 독립 수치 제어 */}
       <div style={styles.card}>
-        <div style={{ ...styles.cardTitle, display: 'flex', justifyContent: 'space-between' }}>
+        <div style={{ ...styles.cardTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>독립 수치 제어</span>
-          <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 'bold', borderLeft: 'none', paddingLeft: 0 }}>{activeMode}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {(() => {
+              const bDiff = getBrightnessDiff();
+              if(bDiff) return (
+                <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '4px', backgroundColor: bDiff.color + '20', color: bDiff.color, fontWeight: 'bold' }}>
+                  ⚖️ {bDiff.text}
+                </span>
+              );
+              return null;
+            })()}
+            <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 'bold', borderLeft: 'none', paddingLeft: 0 }}>{activeMode}</span>
+          </div>
         </div>
 
         {activeMode === '세로4분' && (
