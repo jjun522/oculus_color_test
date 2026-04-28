@@ -25,9 +25,7 @@ public class VRStateData
     public int leftTemporal;      // 왼쪽 눈 귀쪽 밝기
     public int rightNasal;        // 오른쪽 눈 코쪽 밝기
     public int rightTemporal;     // 오른쪽 눈 귀쪽 밝기
-    public int q0, q1, q2, q3;   // 십자 4분할 각 영역 밝기 (우상, 우하, 좌상, 좌하)
-    public int leftTop, leftBot;  // 세로 4분할: 1번 띠, 2번 띠
-    public int rightTop, rightBot;// 세로 4분할: 3번 띠, 4번 띠
+    public int q0, q1, q2, q3;    // 십자 4분할 각 영역 밝기 (우상, 우하, 좌상, 좌하)
     public string uiText;         // VR 내 UI 텍스트
     public int currentEyeTarget;  // 어느 눈에 표시? 0=좌, 1=우, 2=양
     public bool isFlipMode;       // 플립 모드 ON/OFF
@@ -41,6 +39,8 @@ public class VRStateData
     public int cfgTargetBright;   // 타겟 밝기
     public int cfgBgBright;       // 배경 밝기
     public string cfgColorOrder;  // 색상 순서 (예: "0,1,2,3")
+    public int cfgBrightStep;     // 단위
+    public float cfgSpotSize;     // 원 크기
 }
 
 public class SimpleEyeTest : MonoBehaviour
@@ -73,10 +73,12 @@ public class SimpleEyeTest : MonoBehaviour
     private float quadScale = 1.8f;      // Quad(화면 패널)의 크기
     private float quadDistance = 5.0f;   // 카메라에서 Quad까지 거리 (미터)
     private float flipInterval = 1.0f;   // 플립 모드에서 좌↔우 전환 간격 (초)
-    private int defaultBright = 50;      // 모드 전환 시 초기 밝기 (%)
+    private int defaultBright = 10;      // 모드 전환 시 초기 밝기 (%)
     private int targetBright = 30;       // 조절 대상 영역의 시작 밝기 (어두운 쪽)
     private int bgBright = 80;           // 비조절 영역의 밝기 (밝은 쪽)
     private int[] colorOrder = { 0, 1, 2, 3 };  // 색상 순환 순서 (0=빨,1=초,2=파,3=흰)
+    private int brightStep = 3;          // 밝기 증감 단위 (%)
+    private float spotSize = 16f;        // 원 크기 설정값
 
     // ============================================================
     // 모드별 Quad 그룹
@@ -96,22 +98,23 @@ public class SimpleEyeTest : MonoBehaviour
     private GameObject grpL_Split, grpR_Split;     // 2분할용 Quad 그룹
     private Renderer[] rendL_Split, rendR_Split;   // [0]=코쪽, [1]=귀쪽
 
-    // --- divMode=3 → 세로 4분할 (눈당 Quad 4개, 수직 띠) ---
-    private GameObject grpL_Vert, grpR_Vert;       // 세로4분할용 Quad 그룹
-    private Renderer[] rendL_Vert, rendR_Vert;     // [0]~[3] = 1~4번 띠 (왼→오)
 
     // --- divMode=4 → 십자 4분할 (눈당 Quad 4개, 2x2 격자) ---
     private GameObject grpL_Cross, grpR_Cross;     // 십자4분할용 Quad 그룹
     private Renderer[] rendL_Cross, rendR_Cross;   // [0]=우상, [1]=우하, [2]=좌상, [3]=좌하
 
+    // --- cfgTargetShape=1 → 256개 원 모드 ---
+    private GameObject grpL_Circles, grpR_Circles;
+    private Renderer[] rendL_Circles, rendR_Circles;
+    public int cfgTargetShape = 0; // 0=전체, 1=원
+
     // ============================================================
     // 밝기 변수 (웹 프로토콜 호환 - 이름 변경 금지)
     // ============================================================
-    private int leftNasal = 50, leftTemporal = 50;    // divMode=2: 왼쪽 눈 코쪽/귀쪽
-    private int rightNasal = 50, rightTemporal = 50;   // divMode=2: 오른쪽 눈 코쪽/귀쪽
-    private int leftTop = 50, leftBot = 50;            // divMode=3: 1번 띠, 2번 띠
-    private int rightTop = 50, rightBot = 50;          // divMode=3: 3번 띠, 4번 띠
-    private int[] quadBright = { 50, 50, 50, 50 };     // divMode=4: 우상/우하/좌상/좌하
+    private int leftNasal = 10, leftTemporal = 10;    // divMode=2: 왼쪽 눈 코쪽/귀쪽
+    private int rightNasal = 10, rightTemporal = 10;   // divMode=2: 오른쪽 눈 코쪽/귀쪽
+
+    private int[] quadBright = { 10, 10, 10, 10 };     // divMode=4: 우상/우하/좌상/좌하
 
     // ============================================================
     // 앱 상태
@@ -131,7 +134,7 @@ public class SimpleEyeTest : MonoBehaviour
     // --- UI 텍스트용 ---
     private string[] targetNames = { "왼쪽 눈", "오른쪽 눈", "양쪽 눈" };
     private string[] quadNames = { "우상단", "우하단", "좌상단", "좌하단" };
-    private string[] vertNames = { "1-3번 띠", "2-4번 띠", "1-4번 띠", "2-3번 띠" };
+
 
     // --- 플립 모드 (양안 교대 깜빡임) ---
     private bool isFlipMode = false;       // 플립 모드 ON?
@@ -148,6 +151,7 @@ public class SimpleEyeTest : MonoBehaviour
     private ConcurrentQueue<string> cmdQueue = new ConcurrentQueue<string>();  // 서버에서 받은 명령 큐 (스레드 안전)
     private string lastStatus = "";    // 마지막 UI 텍스트 (서버 전송용)
     private bool registered, sending;  // 서버 등록 완료? / 현재 전송 중?
+    private bool pendingStateSend;     // 전송이 지연된 상태가 있는가?
     private float lastSendTime;        // 마지막 상태 전송 시각
 
 
@@ -155,13 +159,57 @@ public class SimpleEyeTest : MonoBehaviour
     // ============================================================
     // Start: 앱 시작 시 초기화
     // ============================================================
-    async void Start()
+    void Start()
     {
-        // 레이어 마스크 초기화 (leftLayer=30, rightLayer=31)
-        leftMask = 1 << leftLayer;
-        rightMask = 1 << rightLayer;
+        // 강제로 초기 밝기 고정 (유니티 에디터 캐시 무시)
+        defaultBright = 10;
+        targetBright = 30;
+        bgBright = 80;
+        
+        leftNasal = 10; leftTemporal = 10; rightNasal = 10; rightTemporal = 10;
+        for (int i = 0; i < 4; i++) quadBright[i] = 10;
+        // ---- [추가된 필수 의료 세팅] ----
+        // 1. 디스플레이 주사율을 90Hz로 강제 고정 (교대 점멸 정확도 향상)
+        //OVRPlugin.systemDisplayFrequency = 90.0f;
+        // 2. 주변부 화질 저하 기능(Foveated Rendering) 강제 종료 (시야 검사 정확도 확보)
+        //OVRManager.foveatedRenderingLevel = OVRManager.FoveatedRenderingLevel.Off;
+        // ---------------------------------
 
-        if (crosshair != null) crosshair.SetActive(false);
+        // 레이어 마스크 초기화 (leftLayer=30, rightLayer=31, Default=0, UI=5)
+        // 십자가(crosshair)와 UI가 보이도록 0과 5 레이어를 포함시킴
+        leftMask = (1 << leftLayer) | (1 << 0) | (1 << 5);
+        rightMask = (1 << rightLayer) | (1 << 0) | (1 << 5);
+
+        // 십자가가 인스펙터 구조상 누락되었으면 코드로 직접 자동 생성 (편의 기능)
+        if (crosshair == null)
+        {
+            crosshair = new GameObject("AutoCrosshair");
+            crosshair.transform.SetParent(this.transform);
+            
+            // 가로 막대
+            var h = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            h.transform.SetParent(crosshair.transform);
+            h.transform.localPosition = Vector3.zero;
+            h.transform.localScale = new Vector3(0.2f, 0.02f, 1f); // 너무 작으면 렌더링되지 않으므로 크기 복구 (20cm x 2cm)
+            Destroy(h.GetComponent<Collider>());
+            
+            // 세로 막대
+            var v = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            v.transform.SetParent(crosshair.transform);
+            v.transform.localPosition = Vector3.zero;
+            v.transform.localScale = new Vector3(0.02f, 0.2f, 1f); // 너무 작으면 렌더링되지 않으므로 크기 복구 (20cm x 2cm)
+            Destroy(v.GetComponent<Collider>());
+
+            // 눈에 잘 띄는 검정색 단색(빛의 영향 안받는 Unlit)
+            Material crossMat = new Material(Shader.Find("Unlit/Color"));
+            crossMat.color = Color.black;
+            h.GetComponent<Renderer>().material = crossMat;
+            v.GetComponent<Renderer>().material = crossMat;
+
+            SetLayerAll(crosshair, 0); // Default 레이어
+        }
+
+        crosshair.SetActive(false);
 
         // ---- OVRCameraRig의 CenterEyeAnchor 카메라 끄기 ----
         // OVRCameraRig는 기본적으로 CenterEyeAnchor가 양쪽 눈에 렌더링함
@@ -176,9 +224,9 @@ public class SimpleEyeTest : MonoBehaviour
         // 색상 순서 초기화 (colorOrder 배열 → activeColors 배열)
         RebuildColors();
 
-        // 카메라 초기 설정 (배경 검정, 원래 설정 백업)
-        InitCamera(leftCamera);
-        InitCamera(rightCamera);
+        // 카메라 초기 설정 (배경 검정, UI가 보이도록 마스크 설정)
+        InitCamera(leftCamera, leftMask);
+        InitCamera(rightCamera, rightMask);
 
         // 모드별 Quad 세트 전부 생성
         CreateAllQuads();
@@ -247,12 +295,12 @@ public class SimpleEyeTest : MonoBehaviour
     /// - 원래 cullingMask와 clearFlags를 백업 (나중에 복원용)
     /// - 배경을 검은색으로 설정
     /// </summary>
-    void InitCamera(Camera cam)
+    void InitCamera(Camera cam, int mask)
     {
         if (cam == null) return;
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = Color.black;
-        cam.cullingMask = 0; // 시작 시 아무것도 안 보임 (Apply()에서 켜줌)
+        cam.cullingMask = mask; // 시작 시 UI가 보이도록 설정
         cam.enabled = true;
     }
 
@@ -275,7 +323,6 @@ public class SimpleEyeTest : MonoBehaviour
     {
         int d = defaultBright;
         leftNasal = d; leftTemporal = d; rightNasal = d; rightTemporal = d;
-        leftTop = d; leftBot = d; rightTop = d; rightBot = d;
         for (int i = 0; i < 4; i++) quadBright[i] = d;
     }
 
@@ -297,13 +344,14 @@ public class SimpleEyeTest : MonoBehaviour
         grpL_Split = MakeGroup("L_Split", leftCamera, leftLayer, 2, out rendL_Split);
         grpR_Split = MakeGroup("R_Split", rightCamera, rightLayer, 2, out rendR_Split);
 
-        // 세로 4분할 (divMode=3): 눈당 Quad 4개
-        grpL_Vert = MakeGroup("L_Vert", leftCamera, leftLayer, 4, out rendL_Vert);
-        grpR_Vert = MakeGroup("R_Vert", rightCamera, rightLayer, 4, out rendR_Vert);
 
         // 십자 4분할 (divMode=4): 눈당 Quad 4개
         grpL_Cross = MakeGroup("L_Cross", leftCamera, leftLayer, 4, out rendL_Cross);
         grpR_Cross = MakeGroup("R_Cross", rightCamera, rightLayer, 4, out rendR_Cross);
+
+        // 256개 원 모드
+        grpL_Circles = MakeCircleGrid("L_Circles", leftCamera, leftLayer, out rendL_Circles);
+        grpR_Circles = MakeCircleGrid("R_Circles", rightCamera, rightLayer, out rendR_Circles);
     }
 
     /// <summary>
@@ -360,6 +408,42 @@ public class SimpleEyeTest : MonoBehaviour
         return grp;
     }
 
+    GameObject MakeCircleGrid(string name, Camera parent, int layer, out Renderer[] rends)
+    {
+        int count = 256;
+        rends = new Renderer[count];
+        var grp = new GameObject(name);
+
+        if (parent != null)
+        {
+            grp.transform.parent = parent.transform;
+            grp.transform.localPosition = new Vector3(0, 0, quadDistance);
+            grp.transform.localEulerAngles = Vector3.zero;
+        }
+        grp.layer = layer;
+
+        for (int i = 0; i < count; i++)
+        {
+            var q = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            q.name = $"S{i}";
+            q.layer = layer;
+            q.transform.SetParent(grp.transform);
+            q.transform.localRotation = Quaternion.identity;
+
+            var r = q.GetComponent<Renderer>();
+            var sh = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
+            r.material = new Material(sh);
+            r.material.color = Color.black;
+
+            Destroy(q.GetComponent<Collider>());
+            rends[i] = r;
+        }
+
+        SetLayerAll(grp, layer);
+        grp.SetActive(false);
+        return grp;
+    }
+
     /// <summary>
     /// 모든 Quad 그룹의 거리를 quadDistance로 업데이트
     /// 웹에서 CFG:DISTANCE 변경 시 호출
@@ -367,9 +451,13 @@ public class SimpleEyeTest : MonoBehaviour
     void UpdateDistances()
     {
         var all = new[] { grpL_Whole, grpR_Whole, grpL_Split, grpR_Split,
-                          grpL_Vert, grpR_Vert, grpL_Cross, grpR_Cross };
+                          grpL_Cross, grpR_Cross,
+                          grpL_Circles, grpR_Circles };
         foreach (var g in all)
             if (g != null) g.transform.localPosition = new Vector3(0, 0, quadDistance);
+            
+        if (crosshair != null)
+            crosshair.transform.localPosition = new Vector3(0, 0, quadDistance - 0.01f); // 십자가 심도 보정
     }
 
 
@@ -383,7 +471,8 @@ public class SimpleEyeTest : MonoBehaviour
     void HideAllGroups()
     {
         var all = new[] { grpL_Whole, grpR_Whole, grpL_Split, grpR_Split,
-                          grpL_Vert, grpR_Vert, grpL_Cross, grpR_Cross };
+                          grpL_Cross, grpR_Cross,
+                          grpL_Circles, grpR_Circles };
         foreach (var g in all)
             if (g != null) g.SetActive(false);
     }
@@ -405,19 +494,30 @@ public class SimpleEyeTest : MonoBehaviour
             }
             else // 단안 모드: 코쪽/귀쪽 Quad 2개씩
             {
-                if (grpL_Split) grpL_Split.SetActive(true);
-                if (grpR_Split) grpR_Split.SetActive(true);
+                if (cfgTargetShape == 1) // 256개 원 패턴
+                {
+                    if (grpL_Circles) grpL_Circles.SetActive(true);
+                    if (grpR_Circles) grpR_Circles.SetActive(true);
+                }
+                else
+                {
+                    if (grpL_Split) grpL_Split.SetActive(true);
+                    if (grpR_Split) grpR_Split.SetActive(true);
+                }
             }
-        }
-        else if (divisionMode == 3) // 세로 4분할
-        {
-            if (grpL_Vert) grpL_Vert.SetActive(true);
-            if (grpR_Vert) grpR_Vert.SetActive(true);
         }
         else if (divisionMode == 4) // 십자 4분할
         {
-            if (grpL_Cross) grpL_Cross.SetActive(true);
-            if (grpR_Cross) grpR_Cross.SetActive(true);
+            if (cfgTargetShape == 1) // 256개 원 패턴
+            {
+                if (grpL_Circles) grpL_Circles.SetActive(true);
+                if (grpR_Circles) grpR_Circles.SetActive(true);
+            }
+            else
+            {
+                if (grpL_Cross) grpL_Cross.SetActive(true);
+                if (grpR_Cross) grpR_Cross.SetActive(true);
+            }
         }
     }
 
@@ -434,10 +534,18 @@ public class SimpleEyeTest : MonoBehaviour
         LayoutSingle(rendR_Whole, s);
         Layout2Split(rendL_Split, s, true);   // isLeft=true → 코쪽이 오른쪽(+x)
         Layout2Split(rendR_Split, s, false);  // isLeft=false → 코쪽이 왼쪽(-x)
-        LayoutVert4(rendL_Vert, s);
-        LayoutVert4(rendR_Vert, s);
         LayoutCross4(rendL_Cross, s);
         LayoutCross4(rendR_Cross, s);
+        
+        LayoutCircleGrid(rendL_Circles, s);
+        LayoutCircleGrid(rendR_Circles, s);
+
+        if (crosshair != null)
+        {
+            // 기본 quadScale(1.8f)을 기준으로 비례 축소/확대
+            float scaleFactor = s / 1.8f;
+            crosshair.transform.localScale = new Vector3(scaleFactor, scaleFactor, 1f);
+        }
     }
 
     /// <summary>양안 단색: Quad 1개를 화면 전체 크기로</summary>
@@ -466,15 +574,24 @@ public class SimpleEyeTest : MonoBehaviour
         q[1].transform.localScale = new Vector3(s, 2 * s, 1);
     }
 
-    /// <summary>세로 4분할: 4개의 수직 띠를 왼→오 순서로 배치</summary>
-    void LayoutVert4(Renderer[] q, float s)
+    /// <summary>원 모드: 16x16 원 256개를 전체 2sx2s 구역에 균등 배치 배열</summary>
+    void LayoutCircleGrid(Renderer[] q, float s)
     {
-        if (q == null || q.Length < 4) return;
-        float w = (2 * s) / 4f;  // 각 띠의 너비 = 전체÷4
-        for (int i = 0; i < 4; i++)
+        if (q == null || q.Length < 256) return;
+        
+        float cell = s / 8f; // 전체 가로가 2s 이고 16개이므로 칸 하나는 2s/16 = s/8
+        float circleScale = cell * (spotSize / 16f); // 16 꽉 차면 cell 크기 반영
+
+        for (int i = 0; i < 256; i++)
         {
-            q[i].transform.localPosition = new Vector3(-s + w / 2f + w * i, 0, 0);
-            q[i].transform.localScale = new Vector3(w, 2 * s, 1);
+            int x_idx = i % 16;
+            int y_idx = i / 16;
+            
+            float px = -s + (cell / 2f) + (x_idx * cell);
+            float py = -s + (cell / 2f) + (y_idx * cell);
+
+            q[i].transform.localPosition = new Vector3(px, py, 0);
+            q[i].transform.localScale = new Vector3(circleScale, circleScale, 0.001f);
         }
     }
 
@@ -550,11 +667,15 @@ public class SimpleEyeTest : MonoBehaviour
             ? activeColors[currentColorIndex] : Color.white;
 
         // 6) 모드별로 Quad에 색상 적용
-        if (divisionMode == 2)
+        if (cfgTargetShape == 1 && (divisionMode == 4 || (divisionMode == 2 && currentEyeTarget != 2)))
+        {
+            ColorCircles(rendL_Circles, bc, leftOn, true);
+            ColorCircles(rendR_Circles, bc, rightOn, false);
+        }
+        else if (divisionMode == 2)
         {
             if (currentEyeTarget == 2) // 양안 단색
             {
-                // leftNasal을 "왼쪽 눈 전체 밝기"로 사용 (양안 모드에서는 코/귀 구분 없음)
                 SetColor(rendL_Whole, 0, leftNasal, bc, leftOn);
                 SetColor(rendR_Whole, 0, rightNasal, bc, rightOn);
             }
@@ -566,16 +687,6 @@ public class SimpleEyeTest : MonoBehaviour
                 SetColor(rendR_Split, 1, rightTemporal, bc, rightOn); // 오른눈 귀쪽
             }
         }
-        else if (divisionMode == 3) // 세로 4분할
-        {
-            int[] v = { leftTop, leftBot, rightTop, rightBot };
-            for (int i = 0; i < 4; i++)
-            {
-                // 양쪽 눈에 같은 패턴 표시 (세로 띠는 양안 공통)
-                SetColor(rendL_Vert, i, v[i], bc, leftOn);
-                SetColor(rendR_Vert, i, v[i], bc, rightOn);
-            }
-        }
         else if (divisionMode == 4) // 십자 4분할
         {
             for (int i = 0; i < 4; i++)
@@ -585,8 +696,71 @@ public class SimpleEyeTest : MonoBehaviour
             }
         }
 
-        // 7) UI 텍스트 갱신 + 서버에 상태 전송
+        // 7) 크로스헤어(십자가) 가시성 동적 설정
+        // 2분할/4분할 && Quad 모드일 때 무조건 표시 (양안 모드 포함)
+        if (crosshair != null)
+        {
+            bool showCross = (appState == AppState.Testing) && 
+                             (divisionMode == 2 || divisionMode == 4) && 
+                             (cfgTargetShape == 0);
+            crosshair.SetActive(showCross);
+
+            if (showCross)
+            {
+                if (currentEyeTarget == 2)
+                {
+                    // 양안 모드: 십자가를 중앙에 배치하고 UI 레이어(5) 할당하여 양쪽 눈 모두에 보이게 함
+                    crosshair.transform.SetParent(this.transform, false);
+                    crosshair.transform.localPosition = new Vector3(0, 0, quadDistance - 0.01f);
+                    crosshair.transform.localRotation = Quaternion.identity;
+                    SetLayerAll(crosshair, 5);
+                }
+                else
+                {
+                    // 단안 모드: 현재 검사 중인 눈의 카메라에 십자가를 배치
+                    Camera activeCam = (currentEyeTarget == 0) ? leftCamera : rightCamera;
+                    int activeLayer = (currentEyeTarget == 0) ? leftLayer : rightLayer;
+                    
+                    crosshair.transform.SetParent(activeCam.transform, false);
+                    crosshair.transform.localPosition = new Vector3(0, 0, quadDistance - 0.01f);
+                    crosshair.transform.localRotation = Quaternion.identity;
+                    SetLayerAll(crosshair, activeLayer);
+                }
+            }
+        }
+
+        // 8) UI 텍스트 갱신 + 서버에 상태 전송
         UpdateStatusText();
+    }
+
+    /// <summary>
+    /// 동적으로 256개 구역에 알맞은 영역 변수를 찾아 색상을 할당
+    /// </summary>
+    void ColorCircles(Renderer[] q, Color bc, bool isOn, bool isLeft)
+    {
+        if (q == null || q.Length < 256) return;
+        for (int i = 0; i < 256; i++)
+        {
+            int x_idx = i % 16;
+            int y_idx = i / 16;
+            int bval = defaultBright;
+
+            if (divisionMode == 2)
+            {
+                bool isRightHalf = (x_idx >= 8); // x가 중앙을 넘으면 오른쪽 띠
+                if (isLeft) bval = isRightHalf ? leftNasal : leftTemporal;
+                else bval = isRightHalf ? rightTemporal : rightNasal;
+            }
+            else if (divisionMode == 4)
+            {
+                if (x_idx >= 8 && y_idx >= 8) bval = quadBright[0]; // 우상
+                else if (x_idx >= 8 && y_idx < 8) bval = quadBright[1]; // 우하
+                else if (x_idx < 8 && y_idx >= 8) bval = quadBright[2]; // 좌상
+                else bval = quadBright[3]; // 좌하
+            }
+
+            SetColor(q, i, bval, bc, isOn);
+        }
     }
 
     /// <summary>
@@ -643,7 +817,11 @@ public class SimpleEyeTest : MonoBehaviour
     void SetAdjustMode(int m)
     {
         adjustMode = m;
-        int t = targetBright, b = bgBright, d = defaultBright;
+        if (m == 0) return; // 전체 조절일 때는 값 변경 안 함
+
+        // --- 조절 대상에 따라 타겟/배경 밝기 자동 설정 ---
+        int t = targetBright; // 30
+        int b = bgBright;     // 80
 
         if (divisionMode == 2)
         {
@@ -651,34 +829,28 @@ public class SimpleEyeTest : MonoBehaviour
             {
                 if (m == 1) { leftNasal = t; leftTemporal = t; rightNasal = b; rightTemporal = b; }       // 왼눈이 타겟
                 else if (m == 2) { leftNasal = b; leftTemporal = b; rightNasal = t; rightTemporal = t; }  // 오른눈이 타겟
-                else { leftNasal = d; leftTemporal = d; rightNasal = d; rightTemporal = d; }              // 전체 균일
             }
             else // 단안 모드: 코쪽 vs 귀쪽
             {
-                if (m == 1) { leftNasal = t; rightNasal = t; leftTemporal = b; rightTemporal = b; }       // 코쪽이 타겟
-                else if (m == 2) { leftTemporal = t; rightTemporal = t; leftNasal = b; rightNasal = b; }  // 귀쪽이 타겟
-                else { leftNasal = d; rightNasal = d; leftTemporal = d; rightTemporal = d; }
+                if (m == 1) // 코쪽이 타겟
+                {
+                    leftNasal = t; rightNasal = t;
+                    leftTemporal = b; rightTemporal = b;
+                }
+                else if (m == 2) // 귀쪽이 타겟
+                {
+                    leftNasal = b; rightNasal = b;
+                    leftTemporal = t; rightTemporal = t;
+                }
             }
         }
-        else if (divisionMode == 3) // 세로 4분할: 띠 조합이 타겟
+        else if (divisionMode == 3 || divisionMode == 4)
         {
-            if (m != 0)
+            if (m > 0 && m <= 4)
             {
-                leftTop = (m == 1 || m == 3) ? t : b;   // adjustMode에 따라 특정 띠 조합이 타겟
-                leftBot = (m == 2 || m == 4) ? t : b;
-                rightTop = (m == 1 || m == 4) ? t : b;
-                rightBot = (m == 2 || m == 3) ? t : b;
+                for (int i = 0; i < 4; i++) quadBright[i] = b;
+                quadBright[m - 1] = t;
             }
-            else { leftTop = d; leftBot = d; rightTop = d; rightBot = d; }
-        }
-        else if (divisionMode == 4) // 십자 4분할: 1개 사분면이 타겟
-        {
-            if (m != 0)
-            {
-                int ti = m - 1;  // 타겟 인덱스
-                for (int i = 0; i < 4; i++) quadBright[i] = (i == ti) ? t : b;
-            }
-            else { for (int i = 0; i < 4; i++) quadBright[i] = d; }
         }
     }
 
@@ -691,16 +863,23 @@ public class SimpleEyeTest : MonoBehaviour
         bool aL = (currentEyeTarget == 0 || currentEyeTarget == 2);  // 왼쪽 눈 영향?
         bool aR = (currentEyeTarget == 1 || currentEyeTarget == 2);  // 오른쪽 눈 영향?
 
+        // 플립 모드 편의 기능: 양안 전체 조절 모드(adjustMode==0)일 때, 플립 중이면 조이스틱 조작이 현재 켜져있는 눈의 밝기만 조절하도록 자동 타겟팅
+        int effMode = adjustMode;
+        if (isFlipMode && divisionMode == 2 && currentEyeTarget == 2 && adjustMode == 0)
+        {
+            effMode = isLeftEyeShown ? 1 : 2;
+        }
+
         if (divisionMode == 2)
         {
             if (currentEyeTarget == 2) // 양안 모드: 눈 단위로 조절 (코/귀 동기화)
             {
-                if (adjustMode == 0 || adjustMode == 1)
+                if (effMode == 0 || effMode == 1)
                 {
                     leftNasal = Cl(leftNasal + amt);
                     leftTemporal = leftNasal;  // 양안 모드에서는 코=귀 (눈 전체가 단색)
                 }
-                if (adjustMode == 0 || adjustMode == 2)
+                if (effMode == 0 || effMode == 2)
                 {
                     rightNasal = Cl(rightNasal + amt);
                     rightTemporal = rightNasal;
@@ -708,34 +887,19 @@ public class SimpleEyeTest : MonoBehaviour
             }
             else // 단안 모드: 코쪽/귀쪽 독립 조절
             {
-                if (adjustMode == 0 || adjustMode == 1) // 코쪽
+                if (effMode == 0 || effMode == 1) // 코쪽
                 {
                     if (aL) leftNasal = Cl(leftNasal + amt);
                     if (aR) rightNasal = Cl(rightNasal + amt);
                 }
-                if (adjustMode == 0 || adjustMode == 2) // 귀쪽
+                if (effMode == 0 || effMode == 2) // 귀쪽
                 {
                     if (aL) leftTemporal = Cl(leftTemporal + amt);
                     if (aR) rightTemporal = Cl(rightTemporal + amt);
                 }
             }
         }
-        else if (divisionMode == 3) // 세로 4분할
-        {
-            if (adjustMode == 0) // 전체
-            {
-                leftTop = Cl(leftTop + amt); leftBot = Cl(leftBot + amt);
-                rightTop = Cl(rightTop + amt); rightBot = Cl(rightBot + amt);
-            }
-            else // 조합별
-            {
-                if (adjustMode == 1 || adjustMode == 3) leftTop = Cl(leftTop + amt);
-                if (adjustMode == 2 || adjustMode == 4) leftBot = Cl(leftBot + amt);
-                if (adjustMode == 1 || adjustMode == 4) rightTop = Cl(rightTop + amt);
-                if (adjustMode == 2 || adjustMode == 3) rightBot = Cl(rightBot + amt);
-            }
-        }
-        else if (divisionMode == 4) // 십자 4분할
+        else if (divisionMode == 3 || divisionMode == 4) // 원 모드 & 십자 4분할
         {
             if (adjustMode == 0) // 전체
             {
@@ -771,6 +935,12 @@ public class SimpleEyeTest : MonoBehaviour
 
         // 3) 물리적 입력 (VR 컨트롤러 + 키보드)
         HandleInput();
+
+        // 4) 지연된 상태 전송 처리 (UI 동기화 보장)
+        if (pendingStateSend && !sending && (Time.time - lastSendTime) >= 0.1f)
+        {
+            SendState();
+        }
     }
 
 
@@ -842,7 +1012,6 @@ public class SimpleEyeTest : MonoBehaviour
     {
         appState = AppState.Testing;
         if (statusText != null) statusText.gameObject.SetActive(false);
-        if (crosshair != null) crosshair.SetActive(true);
         Apply();
     }
 
@@ -859,9 +1028,20 @@ public class SimpleEyeTest : MonoBehaviour
         // 무시할 메시지 (기기 목록, JSON 상태)
         if (cmd.StartsWith("DEVICE_LIST:") || cmd.StartsWith("{")) return;
 
-        // --- 모드 전환 명령 (웹 호환) ---
+        // --- SET_MODE_EYE ---
+        if (cmd.StartsWith("SET_MODE_EYE:"))
+        {
+            var p = cmd.Split(':');
+            if (p.Length == 3 && int.TryParse(p[1], out int d) && int.TryParse(p[2], out int e))
+            {
+                SwitchMode(d, e);
+                StartTest();
+            }
+            return;
+        }
+
+        // --- 모드 전환 명령 (기존 웹 호환용) ---
         if (cmd == "MODE_2") { SwitchMode(2, 2); StartTest(); return; }   // 2분할 (양안 강제)
-        if (cmd == "MODE_4V") { SwitchMode(3, 2); StartTest(); return; } // 세로4분할 (양안 강제)
         if (cmd == "MODE_4") { SwitchMode(4, 2); StartTest(); return; }   // 십자4분할 (양안 강제)
 
         // 아직 모드 선택 화면이면 자동으로 검사 시작
@@ -881,6 +1061,40 @@ public class SimpleEyeTest : MonoBehaviour
             Apply(); return;
         }
 
+        // --- SET_ADJUST_MODE: 증감 대상 강제 설정 ---
+        if (cmd.StartsWith("SET_ADJUST_MODE:"))
+        {
+            var p = cmd.Split(':');
+            if (p.Length == 2 && int.TryParse(p[1], out int m))
+            {
+                SetAdjustMode(m);
+                Apply(); SendState();
+            }
+            return;
+        }
+
+        // --- SET_RAPD_PRESET: 한 번의 명령으로 양안 밝기와 조작 대상을 동시 세팅 ---
+        if (cmd.StartsWith("SET_RAPD_PRESET:"))
+        {
+            if (int.TryParse(cmd.Split(':')[1], out int mode))
+            {
+                SwitchMode(2, 2); // 양안 모드로 강제 진입
+                if (mode == 1) 
+                {
+                    leftNasal = leftTemporal = 30;
+                    rightNasal = rightTemporal = 80;
+                }
+                else if (mode == 2)
+                {
+                    leftNasal = leftTemporal = 80;
+                    rightNasal = rightTemporal = 30;
+                }
+                SetAdjustMode(mode);
+                Apply(); SendState();
+            }
+            return;
+        }
+
         // --- SET_VAL: 개별 밝기 직접 지정 (웹 패널에서 입력) ---
         if (cmd.StartsWith("SET_VAL:"))
         {
@@ -896,10 +1110,6 @@ public class SimpleEyeTest : MonoBehaviour
                     case "R_TEMP": rightTemporal = v; break;
                     case "L_ALL": leftNasal = leftTemporal = v; break;   // 왼눈 전체
                     case "R_ALL": rightNasal = rightTemporal = v; break; // 오른눈 전체
-                    case "L_TOP": leftTop = v; break;    // 세로 1번 띠
-                    case "L_BOT": leftBot = v; break;    // 세로 2번 띠
-                    case "R_TOP": rightTop = v; break;   // 세로 3번 띠
-                    case "R_BOT": rightBot = v; break;   // 세로 4번 띠
                     case "Q0": quadBright[0] = v; break; // 십자 우상
                     case "Q1": quadBright[1] = v; break; // 십자 우하
                     case "Q2": quadBright[2] = v; break; // 십자 좌상
@@ -944,18 +1154,18 @@ public class SimpleEyeTest : MonoBehaviour
                 int max = (divisionMode == 2) ? 3 : 5;
                 SetAdjustMode((adjustMode + 1) % max);
                 break;
-            case "BRIGHT_UP":          // 밝기 +5%
-                ChangeBrightness(5); break;
-            case "BRIGHT_DOWN":        // 밝기 -5%
-                ChangeBrightness(-5); break;
-            case "BRIGHT_UP_L":        // 왼눈만 +5%
-                leftNasal = Cl(leftNasal + 5); leftTemporal = Cl(leftTemporal + 5); break;
-            case "BRIGHT_DOWN_L":      // 왼눈만 -5%
-                leftNasal = Cl(leftNasal - 5); leftTemporal = Cl(leftTemporal - 5); break;
-            case "BRIGHT_UP_R":        // 오른눈만 +5%
-                rightNasal = Cl(rightNasal + 5); rightTemporal = Cl(rightTemporal + 5); break;
-            case "BRIGHT_DOWN_R":      // 오른눈만 -5%
-                rightNasal = Cl(rightNasal - 5); rightTemporal = Cl(rightTemporal - 5); break;
+            case "BRIGHT_UP":          // 밝기 +step
+                ChangeBrightness(brightStep); break;
+            case "BRIGHT_DOWN":        // 밝기 -step
+                ChangeBrightness(-brightStep); break;
+            case "BRIGHT_UP_L":        // 왼눈만 +step
+                leftNasal = Cl(leftNasal + brightStep); leftTemporal = Cl(leftTemporal + brightStep); break;
+            case "BRIGHT_DOWN_L":      // 왼눈만 -step
+                leftNasal = Cl(leftNasal - brightStep); leftTemporal = Cl(leftTemporal - brightStep); break;
+            case "BRIGHT_UP_R":        // 오른눈만 +step
+                rightNasal = Cl(rightNasal + brightStep); rightTemporal = Cl(rightTemporal + brightStep); break;
+            case "BRIGHT_DOWN_R":      // 오른눈만 -step
+                rightNasal = Cl(rightNasal - brightStep); rightTemporal = Cl(rightTemporal - brightStep); break;
         }
         Apply();
     }
@@ -1012,6 +1222,17 @@ public class SimpleEyeTest : MonoBehaviour
                 RebuildColors();       // activeColors 재구성
                 currentColorIndex = 0; // 첫 번째 색상으로 리셋
                 break;
+            case "BRIGHT_STEP":
+            case "brightStep":
+                if (int.TryParse(p[2], out int bs)) brightStep = Mathf.Clamp(bs, 1, 100);
+                break;
+            case "SPOT_SIZE":
+            case "spotSize":
+                if (float.TryParse(p[2], out float ss)) { spotSize = Mathf.Clamp(ss, 1f, 100f); LayoutAll(); }
+                break;
+            case "TARGET_SHAPE":
+                if (int.TryParse(p[2], out int ts)) { cfgTargetShape = ts; Apply(); }
+                break;
         }
         Apply();
         SendState();  // 변경된 설정값을 웹에 전송
@@ -1033,9 +1254,7 @@ public class SimpleEyeTest : MonoBehaviour
         if (appState == AppState.ModeSelection) return;
 
         string modeStr;
-        if (divisionMode == 3)
-            modeStr = adjustMode == 0 ? "세로 전체" : vertNames[adjustMode - 1];
-        else if (divisionMode == 4)
+        if (divisionMode == 4)
             modeStr = adjustMode == 0 ? "전체 조절" : $"{quadNames[adjustMode - 1]} 조절";
         else // divisionMode == 2
         {
@@ -1156,8 +1375,17 @@ public class SimpleEyeTest : MonoBehaviour
     async void SendState()
     {
         if (!registered || ws == null || ws.State != WebSocketState.Open) return;
-        if (sending || (Time.time - lastSendTime) < 0.1f) return;
-        sending = true; lastSendTime = Time.time;
+        
+        // 너무 잦은 전송 방지 (0.1초 제한) -> 지연 전송 예약
+        if (sending || (Time.time - lastSendTime) < 0.1f)
+        {
+            pendingStateSend = true;
+            return;
+        }
+        
+        sending = true; 
+        lastSendTime = Time.time;
+        pendingStateSend = false; // 전송 시작하므로 예약 해제
 
         try
         {
@@ -1174,10 +1402,6 @@ public class SimpleEyeTest : MonoBehaviour
                 q1 = quadBright[1],
                 q2 = quadBright[2],
                 q3 = quadBright[3],
-                leftTop = leftTop,
-                leftBot = leftBot,
-                rightTop = rightTop,
-                rightBot = rightBot,
                 uiText = lastStatus,
                 currentEyeTarget = currentEyeTarget,
                 isFlipMode = isFlipMode,
@@ -1190,7 +1414,9 @@ public class SimpleEyeTest : MonoBehaviour
                 cfgDefaultBright = defaultBright,
                 cfgTargetBright = targetBright,
                 cfgBgBright = bgBright,
-                cfgColorOrder = string.Join(",", colorOrder)
+                cfgColorOrder = string.Join(",", colorOrder),
+                cfgBrightStep = brightStep,
+                cfgSpotSize = spotSize
             };
 
             string json = JsonUtility.ToJson(data);

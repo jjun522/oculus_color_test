@@ -5,27 +5,27 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('control'); // 'control' | 'settings'
   const [vrState, setVrState] = useState({
     divMode: 2, colorIdx: 0,
-    leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
-    q0: 50, q1: 50, q2: 50, q3: 50,
-    leftTop: 50, leftBot: 50, rightTop: 50, rightBot: 50,
+    leftNasal: 10, leftTemporal: 10, rightNasal: 10, rightTemporal: 10,
+    q0: 10, q1: 10, q2: 10, q3: 10,
+    leftTop: 10, leftBot: 10, rightTop: 10, rightBot: 10,
     uiText: "VR 기기의 신호를 기다리고 있습니다...",
     currentEyeTarget: 2, isFlipMode: false, isLeftEyeShown: true,
     leftFlipAdj: 100,
     cfgScale: 1.8, cfgDistance: 5.0, cfgFlipInterval: 1.0,
-    cfgColorOrder: "0,1,2,3"
+    cfgColorOrder: "0,1,2,3", cfgBrightStep: 3, cfgSpotSize: 16
   });
 
   const [logs, setLogs] = useState([]);
   const [inputVal, setInputVal] = useState({
-    leftNasal: 50, leftTemporal: 50, rightNasal: 50, rightTemporal: 50,
-    q0: 50, q1: 50, q2: 50, q3: 50,
-    leftTop: 50, leftBot: 50, rightTop: 50, rightBot: 50,
+    leftNasal: 10, leftTemporal: 10, rightNasal: 10, rightTemporal: 10,
+    q0: 10, q1: 10, q2: 10, q3: 10,
+    leftTop: 10, leftBot: 10, rightTop: 10, rightBot: 10,
     flipInterval: 1.0, leftFlipAdj: 100
   });
   const [cfgInput, setCfgInput] = useState({
     scale: 1.8, distance: 5.0, flipInterval: 1.0,
-    defaultBright: 50, targetBright: 30, bgBright: 80,
-    colorOrder: "0,1,2,3"
+    defaultBright: 10, targetBright: 30, bgBright: 80,
+    colorOrder: "0,1,2,3", brightStep: 3, spotSize: 16, targetShape: 0
   });
   const [connectedDevices, setConnectedDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('ALL');
@@ -106,6 +106,9 @@ const App = () => {
                 targetBright: data.cfgTargetBright ?? prev.targetBright,
                 bgBright: data.cfgBgBright ?? prev.bgBright,
                 colorOrder: data.cfgColorOrder ?? prev.colorOrder,
+                brightStep: data.cfgBrightStep ?? prev.brightStep,
+                spotSize: data.cfgSpotSize ?? prev.spotSize,
+                targetShape: data.cfgTargetShape ?? prev.targetShape,
               }));
             }
           }
@@ -142,22 +145,31 @@ const App = () => {
   };
 
   const getActiveMode = () => {
-    if (vrState.divMode === 3) return '세로4분';
-    if (vrState.divMode === 4) return '4분면';
-    if (vrState.currentEyeTarget === 0) return '좌안';
-    if (vrState.currentEyeTarget === 1) return '우안';
-    return '양안';
+    if (vrState.divMode === 2 && vrState.currentEyeTarget === 0) return 'L2';
+    if (vrState.divMode === 2 && vrState.currentEyeTarget === 1) return 'R2';
+    if (vrState.divMode === 4 && vrState.currentEyeTarget === 0) return 'L4';
+    if (vrState.divMode === 4 && vrState.currentEyeTarget === 1) return 'R4';
+    return 'RAPD';
   };
   const activeMode = getActiveMode();
 
   const getBrightnessDiff = () => {
-    if (activeMode === '세로4분' || activeMode === '4분면') return null;
+    if (vrState.divMode === 4) return null;
     const lAvg = (vrState.leftNasal + vrState.leftTemporal) / 2;
     const rAvg = (vrState.rightNasal + vrState.rightTemporal) / 2;
-    const diff = Math.abs(lAvg - rAvg).toFixed(1);
-    if (diff == 0) return { text: "밝기 동일", color: "#10b981", diff };
-    if (lAvg > rAvg) return { text: `좌안이 ${diff}% 더 밝음`, color: "#e11d48", diff };
-    return { text: `우안이 ${diff}% 더 밝음`, color: "#0284c7", diff };
+    
+    const lLux = 87 * Math.pow(lAvg / 100, 2.2) * Math.PI;
+    const rLux = 87 * Math.pow(rAvg / 100, 2.2) * Math.PI;
+
+    if (Math.abs(lLux - rLux) < 0.1) return { text: "차이 없음", color: "#10b981", diff: 0 };
+    
+    if (lLux > rLux) {
+        const rapd = Math.log10(lLux / rLux).toFixed(2);
+        return { text: `RAPD: ${rapd} log (L)`, color: "#e11d48", diff: rapd };
+    } else {
+        const rapd = Math.log10(rLux / lLux).toFixed(2);
+        return { text: `RAPD: ${rapd} log (R)`, color: "#0284c7", diff: rapd };
+    }
   };
 
   useEffect(() => {
@@ -179,7 +191,7 @@ const App = () => {
 
   const ValueOverlay = ({ percent, isSmall }) => (
     <div style={styles.valueOverlay}>
-      <div style={{ fontSize: isSmall ? '40px' : '72px', fontWeight: '900' }}>{percent}%</div>
+      <div style={{ fontSize: isSmall ? '40px' : '72px', fontWeight: '900' }}>{percent}</div>
       <div style={{ fontSize: isSmall ? '18px' : '26px', color: '#fbbf24', fontWeight: 'bold' }}>{calculateLux(percent)} Lux</div>
     </div>
   );
@@ -219,43 +231,16 @@ const App = () => {
       </>
     );
 
-    if (activeMode === '세로4분') {
-      const strips = [
-        { label: '1번', val: vrState.leftTop }, { label: '2번', val: vrState.leftBot },
-        { label: '3번', val: vrState.rightTop }, { label: '4번', val: vrState.rightBot }
-      ];
-      return (
-        <div style={styles.screenContainer}>
-          <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-            {/* 좌측 안구 */}
-            <div style={{ flex: 1, display: 'flex', borderRight: '2px solid #444', opacity: leftOpacity }}>
-              {strips.map((s, i) => (
-                <div key={i} style={{ flex: 1, position: 'relative', backgroundColor: getRGB(s.val), borderRight: i < 3 ? '1px solid #111' : 'none' }}>
-                  <ValueOverlay percent={s.val} isSmall />
-                </div>
-              ))}
-            </div>
-            {/* 우측 안구 */}
-            <div style={{ flex: 1, display: 'flex', borderLeft: '2px solid #444', opacity: rightOpacity }}>
-              {strips.map((s, i) => (
-                <div key={i} style={{ flex: 1, position: 'relative', backgroundColor: getRGB(s.val), borderRight: i < 3 ? '1px solid #111' : 'none' }}>
-                  <ValueOverlay percent={s.val} isSmall />
-                </div>
-              ))}
-            </div>
-          </div>
-          <CommonOverlay />
-        </div>
-      );
-    }
+    const isCircle = cfgInput.targetShape === 1;
+    const brR = isCircle ? '50%' : '0';
 
-    if (activeMode === '4분면') {
+    if (vrState.divMode === 4) {
       const CrossGrid = ({ opacity }) => (
         <div style={{ flex: 1, position: 'relative', opacity, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }}>
-          <div style={{ backgroundColor: getRGB(vrState.q2), borderRight: '1px solid #111', borderBottom: '1px solid #111' }}><ValueOverlay percent={vrState.q2} isSmall /></div>
-          <div style={{ backgroundColor: getRGB(vrState.q0), borderBottom: '1px solid #111' }}><ValueOverlay percent={vrState.q0} isSmall /></div>
-          <div style={{ backgroundColor: getRGB(vrState.q3), borderRight: '1px solid #111' }}><ValueOverlay percent={vrState.q3} isSmall /></div>
-          <div style={{ backgroundColor: getRGB(vrState.q1) }}><ValueOverlay percent={vrState.q1} isSmall /></div>
+          <div style={{ backgroundColor: getRGB(vrState.q2), borderRight: '1px solid #111', borderBottom: '1px solid #111', borderRadius: brR, margin: isCircle ? '5px' : 0 }}><ValueOverlay percent={vrState.q2} isSmall /></div>
+          <div style={{ backgroundColor: getRGB(vrState.q0), borderBottom: '1px solid #111', borderRadius: brR, margin: isCircle ? '5px' : 0 }}><ValueOverlay percent={vrState.q0} isSmall /></div>
+          <div style={{ backgroundColor: getRGB(vrState.q3), borderRight: '1px solid #111', borderRadius: brR, margin: isCircle ? '5px' : 0 }}><ValueOverlay percent={vrState.q3} isSmall /></div>
+          <div style={{ backgroundColor: getRGB(vrState.q1), borderRadius: brR, margin: isCircle ? '5px' : 0 }}><ValueOverlay percent={vrState.q1} isSmall /></div>
         </div>
       );
       return (
@@ -269,6 +254,8 @@ const App = () => {
       );
     }
 
+
+
     return (
       <div style={styles.screenContainer}>
         <div style={{ display: 'flex', width: '100%', height: '100%' }}>
@@ -280,8 +267,8 @@ const App = () => {
               </div>
             ) : (
               <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-                <div style={{ flex: 1, backgroundColor: getRGB(vrState.leftTemporal), position: 'relative' }}><ValueOverlay percent={vrState.leftTemporal} isSmall /></div>
-                <div style={{ flex: 1, backgroundColor: getRGB(vrState.leftNasal), position: 'relative', borderLeft: '1px solid black' }}><ValueOverlay percent={vrState.leftNasal} isSmall /></div>
+                <div style={{ flex: 1, backgroundColor: getRGB(vrState.leftTemporal), position: 'relative', borderRadius: brR, margin: isCircle ? '10px' : 0 }}><ValueOverlay percent={vrState.leftTemporal} isSmall /></div>
+                <div style={{ flex: 1, backgroundColor: getRGB(vrState.leftNasal), position: 'relative', borderLeft: isCircle?'none':'1px solid black', borderRadius: brR, margin: isCircle ? '10px' : 0 }}><ValueOverlay percent={vrState.leftNasal} isSmall /></div>
               </div>
             )}
           </div>
@@ -293,8 +280,8 @@ const App = () => {
               </div>
             ) : (
               <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-                <div style={{ flex: 1, backgroundColor: getRGB(vrState.rightNasal), position: 'relative' }}><ValueOverlay percent={vrState.rightNasal} isSmall /></div>
-                <div style={{ flex: 1, backgroundColor: getRGB(vrState.rightTemporal), position: 'relative', borderLeft: '1px solid black' }}><ValueOverlay percent={vrState.rightTemporal} isSmall /></div>
+                <div style={{ flex: 1, backgroundColor: getRGB(vrState.rightNasal), position: 'relative', borderRadius: brR, margin: isCircle ? '10px' : 0 }}><ValueOverlay percent={vrState.rightNasal} isSmall /></div>
+                <div style={{ flex: 1, backgroundColor: getRGB(vrState.rightTemporal), position: 'relative', borderLeft: isCircle?'none':'1px solid black', borderRadius: brR, margin: isCircle ? '10px' : 0 }}><ValueOverlay percent={vrState.rightTemporal} isSmall /></div>
               </div>
             )}
           </div>
@@ -305,11 +292,10 @@ const App = () => {
   };
 
   const modeButtons = [
-    { key: '좌안', label: '좌안 단독', cmd: () => sendCommand('EYE_LEFT'), bg: '#ffe4e6', activeBg: '#e11d48', tc: '#e11d48' },
-    { key: '우안', label: '우안 단독', cmd: () => sendCommand('EYE_RIGHT'), bg: '#ffe4e6', activeBg: '#e11d48', tc: '#e11d48' },
-    { key: '양안', label: '양안 모드', cmd: () => sendCommand('MODE_2'), bg: '#e0f2fe', activeBg: '#0284c7', tc: '#0284c7' },
-    { key: '세로4분', label: '세로 4분면', cmd: () => sendCommand('MODE_4V'), bg: '#f0fdf4', activeBg: '#10b981', tc: '#10b981' },
-    { key: '4분면', label: '십자 4분면', cmd: () => sendCommand('MODE_4'), bg: '#fef3c7', activeBg: '#f59e0b', tc: '#f59e0b' },
+    { key: 'L2', label: '좌안 2분할', cmd: () => sendCommand('SET_MODE_EYE:2:0'), bg: '#ffe4e6', activeBg: '#e11d48', tc: '#e11d48', div:2, eye:0 },
+    { key: 'R2', label: '우안 2분할', cmd: () => sendCommand('SET_MODE_EYE:2:1'), bg: '#e0f2fe', activeBg: '#0284c7', tc: '#0284c7', div:2, eye:1 },
+    { key: 'L4', label: '좌안 4분할', cmd: () => sendCommand('SET_MODE_EYE:4:0'), bg: '#fef3c7', activeBg: '#f59e0b', tc: '#f59e0b', div:4, eye:0 },
+    { key: 'R4', label: '우안 4분할', cmd: () => sendCommand('SET_MODE_EYE:4:1'), bg: '#f0fdf4', activeBg: '#10b981', tc: '#10b981', div:4, eye:1 },
   ];
 
   // ============================================================
@@ -380,6 +366,27 @@ const App = () => {
             ))}
           </div>
         </div>
+
+        <div style={styles.card}>
+          <h3 style={styles.cardTitle}>원 모드 설정</h3>
+          <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b' }}>타겟 크기</span>
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>각 분면의 원 크기</span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <select value={cfgInput.spotSize} onChange={e => {
+                    const val = parseInt(e.target.value);
+                    setCfgInput({...cfgInput, spotSize: val});
+                    sendCfg('SPOT_SIZE', val);
+                }} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: 'bold' }}>
+                    <option value="16">16x16</option>
+                    <option value="8">8x8</option>
+                    <option value="4">4x4</option>
+                </select>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -399,88 +406,90 @@ const App = () => {
       </div>
 
       <div style={styles.card}>
-        <h3 style={styles.cardTitle}>검사 모드</h3>
+        <h3 style={styles.cardTitle}>밝기 검사</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '12px' }}>
-          {modeButtons.map(m => (
-            <button key={m.key} style={{ ...styles.btn, backgroundColor: activeMode === m.key ? m.activeBg : m.bg, color: activeMode === m.key ? 'white' : m.tc }} onClick={m.cmd}>{m.label}</button>
-          ))}
+          {modeButtons.map(m => {
+            const isActive = vrState.divMode === m.div && vrState.currentEyeTarget === m.eye;
+            return <button key={m.key} style={{ ...styles.btn, backgroundColor: isActive ? m.activeBg : m.bg, color: isActive ? 'white' : m.tc }} onClick={m.cmd}>{m.label}</button>;
+          })}
         </div>
 
-        <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginBottom: '6px' }} onClick={() => sendCommand('CHANGE_COLOR')}>색상 변경</button>
-        <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginBottom: '12px' }} onClick={() => sendCommand('CHANGE_TARGET')}>타겟 영역 변경</button>
+        <div style={{ padding: '8px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '8px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', color: '#334155' }}>타겟 형태 (모양)</div>
+          <div style={{ display: 'flex', gap: '15px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}>
+              <input type="radio" name="targetShape" checked={cfgInput.targetShape === 0} onChange={() => { setCfgInput({...cfgInput, targetShape:0}); sendCfg('TARGET_SHAPE', 0); }} /> 전체 영역 (Quad)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}>
+              <input type="radio" name="targetShape" checked={cfgInput.targetShape === 1} onChange={() => { setCfgInput({...cfgInput, targetShape:1}); sendCfg('TARGET_SHAPE', 1); }} /> 256 Grid (원)
+            </label>
+          </div>
+        </div>
 
         <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={{ ...styles.btn, flex: 1, backgroundColor: '#3b82f6', color: 'white', fontSize: '16px' }} onClick={() => sendCommand('BRIGHT_UP')}>▲ +5%</button>
-          <button style={{ ...styles.btn, flex: 1, backgroundColor: '#3b82f6', color: 'white', fontSize: '16px' }} onClick={() => sendCommand('BRIGHT_DOWN')}>▼ -5%</button>
+          <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginBottom: '6px' }} onClick={() => sendCommand('CHANGE_COLOR')}>색상 변경</button>
+          <button style={{ ...styles.btn, backgroundColor: '#e0f2fe', color: '#0284c7', width: '100%', marginBottom: '6px' }} onClick={() => sendCommand('CHANGE_TARGET')}>영역 이동</button>
         </div>
       </div>
 
       <div style={styles.card}>
-        <h3 style={styles.cardTitle}>플립 모드</h3>
+        <h3 style={styles.cardTitle}>밝기 일괄 제어</h3>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+          <span style={{fontSize: '13px', fontWeight: 'bold'}}>증감 단위:</span>
+          <input type="number" min="1" max="50" value={cfgInput.brightStep} onChange={e => {
+            const val = parseInt(e.target.value) || 1;
+            setCfgInput({...cfgInput, brightStep: val});
+            sendCfg('BRIGHT_STEP', val);
+          }} style={{ width: '50px', padding: '6px', textAlign: 'center', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: 'bold' }} />
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button style={{ ...styles.btn, flex: 1, backgroundColor: '#3b82f6', color: 'white', fontSize: '18px', padding: '12px' }} onClick={() => sendCommand('BRIGHT_UP')}>▲ +{cfgInput.brightStep}</button>
+          <button style={{ ...styles.btn, flex: 1, backgroundColor: '#3b82f6', color: 'white', fontSize: '18px', padding: '12px' }} onClick={() => sendCommand('BRIGHT_DOWN')}>▼ -{cfgInput.brightStep}</button>
+        </div>
+      </div>
+
+      <div style={styles.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <h3 style={{...styles.cardTitle, margin: 0}}>RAPD / 플립 모드</h3>
+          {(() => {
+            if (!vrState.isFlipMode) return null; // 플립모드일 때만 RAPD 로그값 표시
+            const bDiff = getBrightnessDiff();
+            if(bDiff) return (
+              <span style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '4px', backgroundColor: bDiff.color + '20', color: bDiff.color, fontWeight: 'bold' }}>
+                {bDiff.text}
+              </span>
+            );
+            return null;
+          })()}
+        </div>
+        <button style={{ ...styles.btn, backgroundColor: '#1e293b', color: 'white', width: '100%', marginBottom: '8px', padding: '8px' }} onClick={() => sendCommand('SET_MODE_EYE:2:2')}>
+          양안 모드 (RAPD 준비)
+        </button>
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+          <button style={{ ...styles.btn, backgroundColor: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }} onClick={() => sendCommand('SET_RAPD_PRESET:1')}>
+            좌 30 / 우 80
+          </button>
+          <button style={{ ...styles.btn, backgroundColor: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }} onClick={() => sendCommand('SET_RAPD_PRESET:2')}>
+            좌 80 / 우 30
+          </button>
+        </div>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
           <button style={{ ...styles.btn, flex: 2, backgroundColor: vrState.isFlipMode ? '#ef4444' : '#10b981', color: 'white' }} onClick={() => sendCommand('TOGGLE_FLIP')}>
-            {vrState.isFlipMode ? '⏹ 중지' : '▶ 시작'}
+            {vrState.isFlipMode ? '중지' : '시작'}
           </button>
           <input type="number" step="0.1" min="0.1" value={inputVal.flipInterval} onChange={e => setInputVal({ ...inputVal, flipInterval: e.target.value })} style={{ ...styles.smallInput, width: '50px' }} />
           <small style={{ fontSize: '10px', alignSelf: 'center' }}>초</small>
           <button style={{ ...styles.setBtn, padding: '0 8px' }} onClick={() => sendCommand(`SET_FLIP_INTERVAL:${inputVal.flipInterval}`)}>Set</button>
         </div>
-
-        {vrState.isFlipMode && (
-          <div style={{ marginTop: '12px', padding: '10px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#e11d48' }}>좌안 보정 % (Flip 전용)</span>
-              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>{inputVal.leftFlipAdj}%</span>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input type="range" min="0" max="100" value={inputVal.leftFlipAdj} 
-                onChange={e => {
-                  const val = parseInt(e.target.value);
-                  setInputVal({ ...inputVal, leftFlipAdj: val });
-                  sendCommand(`SET_LEFT_FLIP_ADJ:${val}`);
-                }} 
-                style={{ flex: 1 }} 
-              />
-              <button style={{ ...styles.setBtn, padding: '4px 8px', width: 'auto' }} onClick={() => sendCommand(`SET_LEFT_FLIP_ADJ:${inputVal.leftFlipAdj}`)}>저장</button>
-            </div>
-            <small style={{ fontSize: '10px', color: '#64748b' }}>* FLIP 모드에서 좌안 전용 강도 조절</small>
-          </div>
-        )}
       </div>
 
       {/* 독립 수치 제어 */}
       <div style={styles.card}>
         <div style={{ ...styles.cardTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>독립 수치 제어</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {(() => {
-              const bDiff = getBrightnessDiff();
-              if(bDiff) return (
-                <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '4px', backgroundColor: bDiff.color + '20', color: bDiff.color, fontWeight: 'bold' }}>
-                  ⚖️ {bDiff.text}
-                </span>
-              );
-              return null;
-            })()}
-            <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 'bold', borderLeft: 'none', paddingLeft: 0 }}>{activeMode}</span>
-          </div>
         </div>
 
-        {activeMode === '세로4분' && (
-          <div style={styles.eyePanel}>
-            {[{ label: '1번 띠', valKey: 'leftTop', target: 'L_TOP' }, { label: '2번 띠', valKey: 'leftBot', target: 'L_BOT' },
-            { label: '3번 띠', valKey: 'rightTop', target: 'R_TOP' }, { label: '4번 띠', valKey: 'rightBot', target: 'R_BOT' }
-            ].map(row => (
-              <div key={row.label} style={styles.inputRow}>
-                <span style={{ width: '40px', fontSize: '13px', fontWeight: 'bold' }}>{row.label}</span>
-                <input type="number" value={inputVal[row.valKey]} onChange={e => setInputVal({ ...inputVal, [row.valKey]: e.target.value })} style={styles.smallInput} />
-                <button style={{ ...styles.setBtn, backgroundColor: '#10b981' }} onClick={() => sendVal(row.target, inputVal[row.valKey])}>Set</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {activeMode === '4분면' && (
+        {(vrState.divMode === 4) && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             {[{ label: '좌상(Q2)', key: 'q2', target: 'Q2' }, { label: '우상(Q0)', key: 'q0', target: 'Q0' },
             { label: '좌하(Q3)', key: 'q3', target: 'Q3' }, { label: '우하(Q1)', key: 'q1', target: 'Q1' }].map(q => (
@@ -493,7 +502,7 @@ const App = () => {
           </div>
         )}
 
-        {(activeMode === '좌안' || activeMode === '우안' || activeMode === '양안') && (
+        {(vrState.divMode === 2) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {vrState.currentEyeTarget === 2 ? (
               [{ title: '[ 좌안 ]', tc: '#e11d48', vk: 'leftNasal', tg: 'L_ALL' }, { title: '[ 우안 ]', tc: '#0284c7', vk: 'rightNasal', tg: 'R_ALL' }].map(p => (
