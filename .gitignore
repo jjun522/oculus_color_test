@@ -25,3 +25,7 @@ Assets/AssetStoreTools*
 *.unitypackage
 *.sln
 *.userprefs
+*.zip
+*.pkg
+*.exe
+Eye_Test_Hospital_Deploy/build/

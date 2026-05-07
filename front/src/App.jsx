@@ -12,7 +12,9 @@ const App = () => {
     currentEyeTarget: 2, isFlipMode: false, isLeftEyeShown: true,
     leftFlipAdj: 100,
     cfgScale: 2.0, cfgDistance: 2.0, cfgFlipInterval: 1.5,
-    cfgColorOrder: "0,1,2,3", cfgBrightStep: 3, cfgSpotSize: 8
+    cfgDefaultBright: 10, cfgTargetBright: 30, cfgBgBright: 80,
+    cfgColorOrder: "0,1,2,3", cfgBrightStep: 5, cfgSpotSize: 80,
+    cfgCircleScale: 1.8, cfgCircleDistance: 5.0
   });
 
   const [logs, setLogs] = useState([]);
@@ -25,7 +27,8 @@ const App = () => {
   const [cfgInput, setCfgInput] = useState({
     scale: 2.0, distance: 2.0, flipInterval: 1.5,
     defaultBright: 10, targetBright: 30, bgBright: 80,
-    colorOrder: "0,1,2,3", brightStep: 3, spotSize: 8, targetShape: 0
+    colorOrder: "0,1,2,3", brightStep: 5, spotSize: 80, targetShape: 0,
+    circleScale: 1.8, circleDistance: 5.0
   });
   const [connectedDevices, setConnectedDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('ALL');
@@ -109,6 +112,8 @@ const App = () => {
                 brightStep: data.cfgBrightStep ?? prev.brightStep,
                 spotSize: data.cfgSpotSize ?? prev.spotSize,
                 targetShape: data.cfgTargetShape ?? prev.targetShape,
+                circleScale: data.cfgCircleScale ?? prev.circleScale,
+                circleDistance: data.cfgCircleDistance ?? prev.circleDistance,
               }));
             }
           }
@@ -226,8 +231,6 @@ const App = () => {
 
     const CommonOverlay = () => (
       <>
-        <div style={styles.crossH}></div>
-        <div style={styles.crossV}></div>
         <div style={styles.textOverlay} dangerouslySetInnerHTML={{ __html: vrState.uiText?.replace(/\n/g, '<br/>') || '' }}></div>
       </>
     );
@@ -347,46 +350,10 @@ const App = () => {
         </div>
 
         <div style={styles.card}>
-          <h3 style={styles.cardTitle}>색상 순서</h3>
-          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>0=빨강, 1=초록, 2=파랑, 3=흰색 (쉼표 구분)</div>
-          <CfgRow label="색상 순서" desc="A버튼 순환 순서" stateKey="colorOrder" cfgKey="COLOR_ORDER" isText />
-          <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-            {[
-              { label: '빨→초→파→흰', val: '0,1,2,3' },
-              { label: '빨→파→초→흰', val: '0,2,1,3' },
-              { label: '흰색만', val: '3' },
-              { label: '빨강만', val: '0' },
-            ].map(preset => (
-              <button key={preset.val} onClick={() => { 
-                setCfgInput({ ...cfgInput, colorOrder: preset.val }); 
-                sendCfg('COLOR_ORDER', preset.val); 
-              }}
-                style={{ flex: 1, padding: '8px 4px', backgroundColor: '#e2e8f0', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={styles.card}>
           <h3 style={styles.cardTitle}>원 모드 설정</h3>
-          <div style={{ padding: '12px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b' }}>타겟 크기</span>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>각 분면의 원 크기</span>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <select value={cfgInput.spotSize} onChange={e => {
-                    const val = parseInt(e.target.value);
-                    setCfgInput({...cfgInput, spotSize: val});
-                    sendCfg('SPOT_SIZE', val);
-                }} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: 'bold' }}>
-                    <option value="16">16x16</option>
-                    <option value="8">8x8</option>
-                    <option value="4">4x4</option>
-                </select>
-            </div>
-          </div>
+          <CfgRow label="원 모드 크기" desc="그리드 전체 크기" cfgKey="circleScale" unit="" step={0.1} min={0.5} max={5} />
+          <CfgRow label="원 모드 거리" desc="카메라~그리드 거리" cfgKey="circleDistance" unit="m" step={0.5} min={1} max={20} />
+          <CfgRow label="타겟 크기" desc="각 원의 크기 비율" cfgKey="spotSize" unit="%" step={5} min={1} max={100} />
         </div>
       </div>
     );
