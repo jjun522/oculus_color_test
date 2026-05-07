@@ -70,15 +70,15 @@ public class SimpleEyeTest : MonoBehaviour
     // ============================================================
     // 설정값 (웹 설정 탭에서 CFG: 명령으로 실시간 변경 가능)
     // ============================================================
-    private float quadScale = 1.8f;      // Quad(화면 패널)의 크기
-    private float quadDistance = 5.0f;   // 카메라에서 Quad까지 거리 (미터)
-    private float flipInterval = 1.0f;   // 플립 모드에서 좌↔우 전환 간격 (초)
+    private float quadScale = 2.0f;      // Quad(화면 패널)의 크기
+    private float quadDistance = 2.0f;   // 카메라에서 Quad까지 거리 (미터)
+    private float flipInterval = 1.5f;   // 플립 모드에서 좌↔우 전환 간격 (초)
     private int defaultBright = 10;      // 모드 전환 시 초기 밝기 (%)
     private int targetBright = 30;       // 조절 대상 영역의 시작 밝기 (어두운 쪽)
     private int bgBright = 80;           // 비조절 영역의 밝기 (밝은 쪽)
     private int[] colorOrder = { 0, 1, 2, 3 };  // 색상 순환 순서 (0=빨,1=초,2=파,3=흰)
     private int brightStep = 3;          // 밝기 증감 단위 (%)
-    private float spotSize = 16f;        // 원 크기 설정값
+    private float spotSize = 8f;         // 원 크기 설정값
 
     // ============================================================
     // 모드별 Quad 그룹
@@ -190,19 +190,19 @@ public class SimpleEyeTest : MonoBehaviour
             var h = GameObject.CreatePrimitive(PrimitiveType.Quad);
             h.transform.SetParent(crosshair.transform);
             h.transform.localPosition = Vector3.zero;
-            h.transform.localScale = new Vector3(0.2f, 0.02f, 1f); // 너무 작으면 렌더링되지 않으므로 크기 복구 (20cm x 2cm)
+            h.transform.localScale = new Vector3(quadScale * 2.0f, 0.02f, 1f); // 4분할 화면 전체 폭
             Destroy(h.GetComponent<Collider>());
             
             // 세로 막대
             var v = GameObject.CreatePrimitive(PrimitiveType.Quad);
             v.transform.SetParent(crosshair.transform);
             v.transform.localPosition = Vector3.zero;
-            v.transform.localScale = new Vector3(0.02f, 0.2f, 1f); // 너무 작으면 렌더링되지 않으므로 크기 복구 (20cm x 2cm)
+            v.transform.localScale = new Vector3(0.02f, quadScale * 2.0f, 1f); // 4분할 화면 전체 높이
             Destroy(v.GetComponent<Collider>());
 
-            // 눈에 잘 띄는 검정색 단색(빛의 영향 안받는 Unlit)
+            // 눈에 잘 띄는 흰색 단색(빛의 영향 안받는 Unlit)
             Material crossMat = new Material(Shader.Find("Unlit/Color"));
-            crossMat.color = Color.black;
+            crossMat.color = Color.white;
             h.GetComponent<Renderer>().material = crossMat;
             v.GetComponent<Renderer>().material = crossMat;
 

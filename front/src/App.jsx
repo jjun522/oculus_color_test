@@ -11,8 +11,8 @@ const App = () => {
     uiText: "VR 기기의 신호를 기다리고 있습니다...",
     currentEyeTarget: 2, isFlipMode: false, isLeftEyeShown: true,
     leftFlipAdj: 100,
-    cfgScale: 1.8, cfgDistance: 5.0, cfgFlipInterval: 1.0,
-    cfgColorOrder: "0,1,2,3", cfgBrightStep: 3, cfgSpotSize: 16
+    cfgScale: 2.0, cfgDistance: 2.0, cfgFlipInterval: 1.5,
+    cfgColorOrder: "0,1,2,3", cfgBrightStep: 3, cfgSpotSize: 8
   });
 
   const [logs, setLogs] = useState([]);
@@ -20,12 +20,12 @@ const App = () => {
     leftNasal: 10, leftTemporal: 10, rightNasal: 10, rightTemporal: 10,
     q0: 10, q1: 10, q2: 10, q3: 10,
     leftTop: 10, leftBot: 10, rightTop: 10, rightBot: 10,
-    flipInterval: 1.0, leftFlipAdj: 100
+    flipInterval: 1.5, leftFlipAdj: 100
   });
   const [cfgInput, setCfgInput] = useState({
-    scale: 1.8, distance: 5.0, flipInterval: 1.0,
+    scale: 2.0, distance: 2.0, flipInterval: 1.5,
     defaultBright: 10, targetBright: 30, bgBright: 80,
-    colorOrder: "0,1,2,3", brightStep: 3, spotSize: 16, targetShape: 0
+    colorOrder: "0,1,2,3", brightStep: 3, spotSize: 8, targetShape: 0
   });
   const [connectedDevices, setConnectedDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('ALL');
@@ -158,8 +158,8 @@ const App = () => {
     const lAvg = (vrState.leftNasal + vrState.leftTemporal) / 2;
     const rAvg = (vrState.rightNasal + vrState.rightTemporal) / 2;
     
-    const lLux = 87 * Math.pow(lAvg / 100, 2.2) * Math.PI;
-    const rLux = 87 * Math.pow(rAvg / 100, 2.2) * Math.PI;
+    const lLux = 100 * Math.pow(lAvg / 100, 2.2) * Math.PI;
+    const rLux = 100 * Math.pow(rAvg / 100, 2.2) * Math.PI;
 
     if (Math.abs(lLux - rLux) < 0.1) return { text: "차이 없음", color: "#10b981", diff: 0 };
     
@@ -187,7 +187,7 @@ const App = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTab]);
 
-  const calculateLux = (p) => (87 * Math.pow(p / 100, 2.2) * Math.PI).toFixed(1);
+  const calculateLux = (p) => (100 * Math.pow(p / 100, 2.2) * Math.PI).toFixed(1);
 
   const ValueOverlay = ({ percent, isSmall }) => (
     <div style={styles.valueOverlay}>
@@ -226,7 +226,8 @@ const App = () => {
 
     const CommonOverlay = () => (
       <>
-        <div style={styles.cross}>+</div>
+        <div style={styles.crossH}></div>
+        <div style={styles.crossV}></div>
         <div style={styles.textOverlay} dangerouslySetInnerHTML={{ __html: vrState.uiText?.replace(/\n/g, '<br/>') || '' }}></div>
       </>
     );
@@ -629,7 +630,8 @@ const styles = {
   screenContainer: { width: '100%', height: '100%', position: 'relative' },
   quad: { position: 'absolute', display: 'flex', justifyContent: 'center', alignItems: 'center', transition: 'background-color 0.15s' },
   valueOverlay: { color: 'white', textAlign: 'center', textShadow: '3px 3px 8px black', zIndex: 10 },
-  cross: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'white', fontSize: '120px', opacity: 0.2, zIndex: 5, pointerEvents: 'none' },
+  crossH: { position: 'absolute', top: '50%', left: '0', width: '100%', height: '2px', backgroundColor: 'white', opacity: 0.4, zIndex: 5, pointerEvents: 'none', transform: 'translateY(-50%)' },
+  crossV: { position: 'absolute', left: '50%', top: '0', height: '100%', width: '2px', backgroundColor: 'white', opacity: 0.4, zIndex: 5, pointerEvents: 'none', transform: 'translateX(-50%)' },
   textOverlay: { position: 'absolute', bottom: '30px', width: '100%', textAlign: 'center', color: 'white', fontWeight: 'bold', fontSize: '24px', textShadow: '2px 2px 5px black', zIndex: 10 }
 };
 
